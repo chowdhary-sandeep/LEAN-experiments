@@ -849,7 +849,14 @@ class Theorem:
 
     def __post_init__(self) -> None:
         if isinstance(self.file_path, str):
-            object.__setattr__(self, "file_path", Path(self.file_path))
+            # Normalize path separators: convert Windows backslashes to forward slashes
+            # This ensures paths work consistently across platforms
+            normalized_path = self.file_path.replace("\\", "/")
+            object.__setattr__(self, "file_path", Path(normalized_path))
+        else:
+            # If already a Path, normalize the string representation
+            path_str = str(self.file_path).replace("\\", "/")
+            object.__setattr__(self, "file_path", Path(path_str))
         assert (
             self.file_path.suffix == ".lean"
         ), f"File extension must be .lean: {self.file_path}"

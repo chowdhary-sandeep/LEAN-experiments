@@ -2,7 +2,6 @@
 
 import re
 import os
-import ray
 import time
 import urllib
 import typing
@@ -13,8 +12,17 @@ from pathlib import Path
 from loguru import logger
 from functools import cache
 from contextlib import contextmanager
-from ray.util.actor_pool import ActorPool
 from typing import Tuple, Union, List, Generator, Optional
+
+# Make ray optional (only needed for tracing, not for Dojo)
+try:
+    import ray
+    from ray.util.actor_pool import ActorPool
+    RAY_AVAILABLE = True
+except ImportError:
+    RAY_AVAILABLE = False
+    ray = None
+    ActorPool = None
 
 from .constants import NUM_WORKERS, TMP_DIR, LEAN4_PACKAGES_DIR, LEAN4_BUILD_DIR
 
@@ -73,6 +81,8 @@ def ray_actor_pool(
     Yields:
         Generator[ActorPool, None, None]: A :class:`ray.util.actor_pool.ActorPool` object.
     """
+    if not RAY_AVAILABLE:
+        raise ImportError("ray is required for this function. Install with: pip install ray")
     assert not ray.is_initialized()
     ray.init(address="local")
     pool = ActorPool([actor_cls.remote(*args, **kwargs) for _ in range(NUM_WORKERS)])  # type: ignore

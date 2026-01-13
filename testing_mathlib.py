@@ -12,10 +12,14 @@ import shutil
 import traceback
 from pathlib import Path
 
+# Add local lean_dojo_windows_fixes to path if needed
+local_lean_dojo = Path(__file__).parent / "lean_dojo_windows_fixes"
+if local_lean_dojo.exists() and str(local_lean_dojo) not in sys.path:
+    sys.path.insert(0, str(local_lean_dojo))
+
 # Set up environment before imports
-# Set GitHub access token (optional, for higher API rate limits)
-# Get your token from: https://github.com/settings/tokens
-# os.environ["GITHUB_ACCESS_TOKEN"] = "your_token_here"
+# Set GitHub access token for higher API rate limits
+os.environ["GITHUB_ACCESS_TOKEN"] = os.getenv("GITHUB_ACCESS_TOKEN", "YOUR_GITHUB_TOKEN_HERE")
 
 # Enable verbose logging
 from loguru import logger
@@ -51,7 +55,11 @@ def main() -> int:
 
         # Check if already cached (either in LeanDojo cache or local traced_mathlib4)
         rel_cache_dir = repo.get_cache_dirname()
-        cached_path = cache.get(rel_cache_dir)
+        try:
+            cached_path = cache.get(rel_cache_dir)
+        except (AssertionError, FileNotFoundError):
+            # Cache doesn't exist or is corrupted, will trace fresh
+            cached_path = None
         
         # Also check local traced_mathlib4 directory
         local_traced = Path("traced_mathlib4") / "mathlib4"

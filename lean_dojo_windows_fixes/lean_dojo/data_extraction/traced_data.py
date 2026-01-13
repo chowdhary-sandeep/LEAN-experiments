@@ -2,7 +2,6 @@
 
 import re
 import os
-import ray
 import json
 import random
 import itertools
@@ -14,6 +13,20 @@ from pathlib import Path
 from loguru import logger
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Tuple, Union
+
+# Make ray optional (only needed for tracing, not for Dojo)
+try:
+    import ray
+    RAY_AVAILABLE = True
+except ImportError:
+    RAY_AVAILABLE = False
+    # Create a dummy ray.remote decorator
+    class _DummyRayRemote:
+        def __call__(self, *args, **kwargs):
+            def decorator(func):
+                return func
+            return decorator
+    ray = type('ray', (), {'remote': _DummyRayRemote()})()
 
 from ..utils import (
     is_git_repo,
