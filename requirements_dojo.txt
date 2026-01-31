@@ -1,0 +1,8 @@
+# LeanDojo environment (venv_dojo)
+# Prerequisites:
+#   Git >= 2.25
+#   Python 3.9 <= version < 3.13
+#   wget
+#   elan (Lean version manager)
+#   Lean 4: v4.3.0-rc2 or later (install via elan)
+lean-dojo

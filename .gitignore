@@ -4,8 +4,12 @@ traced_*/
 # Python virtual environment
 .venv/
 venv/
+venv_dojo/
 env/
 ENV/
+
+# LeanDojo / GitPython cloned repos (large)
+00_experiment1/gitpython-mathlib4-29dcec074de168ac2bf835a77ef68bbe069194c5/
 
 # Python cache
 __pycache__/
