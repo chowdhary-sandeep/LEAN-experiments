@@ -1894,7 +1894,7 @@ def create_multipanel_figure(measures, ego_networks, output_pdf, output_png):
     print("  Computing unique unresolved premises percentage...")
     unique_unresolved_start = time.time()
     all_premises = set()  # All unique premises
-    unresolved_premises = set()  # Unique unresolved premises
+    unresolved_premises = {}  # Dict: premise_name -> min_confidence (track minimum confidence for each)
     
     with open(DATA_FILE, "r", encoding="utf-8") as f:
         for line in f:
@@ -1918,8 +1918,14 @@ def create_multipanel_figure(measures, ego_networks, output_pdf, output_png):
                     full_name = p.get("full_name", "")
                     if full_name:
                         all_premises.add(full_name)
-                        if p.get("confidence", 1.0) == 0.0:
-                            unresolved_premises.add(full_name)
+                        conf = p.get("confidence", 1.0)
+                        # Track unresolved premises (confidence == 0.0)
+                        if conf == 0.0:
+                            # Track minimum confidence (will be 0.0 for unresolved)
+                            if full_name not in unresolved_premises:
+                                unresolved_premises[full_name] = conf
+                            else:
+                                unresolved_premises[full_name] = min(unresolved_premises[full_name], conf)
             except (json.JSONDecodeError, KeyError):
                 continue
     
@@ -1927,12 +1933,13 @@ def create_multipanel_figure(measures, ego_networks, output_pdf, output_png):
     print(f"    ✓ Unique unresolved premises: {len(unresolved_premises):,} / {len(all_premises):,} ({unique_unresolved_pct:.2f}%)")
     print(f"    Time: {time.time() - unique_unresolved_start:.2f}s")
     
-    # Save unresolved premises to txt for analyses (one full_name per line, sorted)
+    # Save unresolved premises to txt for analyses (one full_name per line with confidence, sorted)
     unresolved_txt = _SCRIPT_DIR / "unresolved_premises.txt"
     with open(unresolved_txt, "w", encoding="utf-8") as f:
-        for name in sorted(unresolved_premises):
-            f.write(name + "\n")
-    print(f"    ✓ Saved {len(unresolved_premises):,} unresolved premises to {unresolved_txt}")
+        for name in sorted(unresolved_premises.keys()):
+            conf = unresolved_premises[name]
+            f.write(f"{name}\t{conf:.4f}\n")
+    print(f"    ✓ Saved {len(unresolved_premises):,} unresolved premises with confidence scores to {unresolved_txt}")
     
     # Create large figure
     fig = plt.figure(figsize=(24, 30), facecolor='white')

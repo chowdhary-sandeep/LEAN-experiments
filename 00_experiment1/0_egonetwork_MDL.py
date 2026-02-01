@@ -15,8 +15,24 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 CACHE_DIR = _SCRIPT_DIR / "cache"
 CACHE_BUNDLE = CACHE_DIR / "bundle.pkl"
 LIB_DIR = _SCRIPT_DIR.parent / "lib" / "vis-9.1.2"
+CORPUS_CODE_INDEX = _SCRIPT_DIR / "jsons" / "corpus_code_index.json"
 
 app = Flask(__name__)
+
+# Load corpus code index
+print("Loading corpus code index...")
+corpus_code_index = {}
+if CORPUS_CODE_INDEX.exists():
+    try:
+        with open(CORPUS_CODE_INDEX, "r", encoding="utf-8") as f:
+            corpus_code_index = json.load(f)
+        print(f"  Loaded {len(corpus_code_index):,} code entries from corpus")
+    except Exception as e:
+        print(f"  Warning: Failed to load corpus code index: {e}")
+        print(f"  Run 00_corpus_to_code.py to generate it")
+else:
+    print(f"  Warning: Corpus code index not found at {CORPUS_CODE_INDEX}")
+    print(f"  Run 00_corpus_to_code.py to generate it")
 
 # Load cached data
 print("Loading cached ego network data...")
@@ -82,7 +98,7 @@ except Exception as e:
 
 
 def format_ego_network_for_vis(theorem, G, ego_data, distance=1):
-    """Format ego network data for vis-network visualization."""
+    """Format ego network data for vis-network visualization with NetworkX positioning."""
     if theorem not in ego_data:
         return None
     
@@ -96,13 +112,83 @@ def format_ego_network_for_vis(theorem, G, ego_data, distance=1):
     ego_nodes.update(parents)
     ego_nodes.update(children)
     
-    # Create node data with topological levels
+    # Build NetworkX subgraph for layout computation
+    ego_subgraph = nx.DiGraph()
+    ego_subgraph.add_nodes_from(ego_nodes)
+    for edge in edges:
+        ego_subgraph.add_edge(edge["from"], edge["to"])
+    
+    # Compute x-coordinates using NetworkX layout (spring_layout works well for connected nodes)
+    if len(ego_nodes) > 1:
+        try:
+            # Use spring_layout to bring connected nodes closer horizontally
+            pos = nx.spring_layout(ego_subgraph, k=1.5, iterations=50, seed=42)
+        except:
+            # Fallback to circular layout if spring_layout fails
+            pos = nx.circular_layout(ego_subgraph)
+    else:
+        pos = {list(ego_nodes)[0]: (0, 0)} if ego_nodes else {}
+    
+    # Group nodes by level for y-coordinate computation
+    nodes_by_level = {}
+    for node in ego_nodes:
+        if node == theorem:
+            level = 2  # Central node
+        elif node in parents:
+            level = 1  # Parents
+        else:
+            level = 3  # Children
+        
+        if level not in nodes_by_level:
+            nodes_by_level[level] = []
+        nodes_by_level[level].append(node)
+    
+    # Compute y-coordinates: base y per level + slight staggering within level
+    level_y_base = {0: -200, 1: -100, 2: 0, 3: 100, 4: 200}  # Base y positions
+    level_y_spacing = 12  # Vertical stagger spacing within level
+    node_positions = {}
+    
+    for level, nodes_at_level in nodes_by_level.items():
+        base_y = level_y_base.get(level, 0)
+        n_at_level = len(nodes_at_level)
+        for idx, node in enumerate(nodes_at_level):
+            # Stagger: alternate vertical offset within level, centered around base_y
+            if n_at_level == 1:
+                stagger_offset = 0
+            else:
+                # Simple alternating pattern: even indices slightly up, odd indices slightly down
+                if idx % 2 == 0:
+                    stagger_offset = (idx // 2) * level_y_spacing
+                else:
+                    stagger_offset = -((idx + 1) // 2) * level_y_spacing
+                # Center the stagger around base_y
+                if n_at_level > 1:
+                    max_offset = ((n_at_level - 1) // 2) * level_y_spacing
+                    if max_offset > 0:
+                        # Adjust to center around 0
+                        if idx % 2 == 0:
+                            stagger_offset = stagger_offset - max_offset / 2
+                        else:
+                            stagger_offset = stagger_offset + max_offset / 2
+            node_positions[node] = {
+                'x': pos[node][0] * 200 if node in pos else 0,  # Scale x-coordinates
+                'y': base_y + stagger_offset
+            }
+    
+    # Create node data with fixed positions
+    # Filter nodes based on distance: only include nodes at or within the selected distance
     nodes = []
     for node in ego_nodes:
+        # For distance 1, only include: theorem, parents, children
+        # (This function is only called for distance 1, but adding check for safety)
+        if distance == 1:
+            if node != theorem and node not in parents and node not in children:
+                continue
+        
         short_name = node.split('.')[-1] if '.' in node else node[:50]
         node_type = G.nodes[node].get("node_type", "unknown")
         
-        # Determine topological level for staggering
+        # Determine topological level
         if node == theorem:
             level = 2  # Central node
         elif node in parents:
@@ -114,36 +200,52 @@ def format_ego_network_for_vis(theorem, G, ego_data, distance=1):
         if node == theorem:
             color = "#FFFFFF"  # White for central theorem
             border_color = "#000000"
-            shape = "box"
         elif node_type == "premise":
             color = "#000000"  # Black for premises
             border_color = "#FFFFFF"
-            shape = "ellipse"
         else:  # child theorem
             color = "#FFFFFF"  # White for child theorems
             border_color = "#000000"
-            shape = "ellipse"
         
-        nodes.append({
+        node_data = {
             "id": node,
-            "label": short_name,
-            "title": node,
+            "label": "",  # Empty label - we'll show text outside
+            "title": node,  # Full name in tooltip
             "color": {
                 "background": color,
                 "border": border_color
             },
-            "shape": shape,
+            "shape": "dot",  # Use dot shape
             "font": {
-                "size": 11 if node == theorem else 10,
-                "color": "#000000" if color == "#FFFFFF" else "#FFFFFF"
+                "size": 0  # No font for dot
             },
             "borderWidth": 2,
-            "level": level
-        })
+            "size": 8,  # Small dot size
+            "level": level,
+            "x": node_positions[node]["x"],
+            "y": node_positions[node]["y"],
+            "fixed": {"x": True, "y": True},
+            "labelText": short_name  # Store label text separately for custom rendering
+        }
+        nodes.append(node_data)
+    
+    # Compute level y positions for separator lines
+    level_y_positions = {}
+    for level in [1, 2, 3]:
+        if level in nodes_by_level:
+            n_at_level = len(nodes_by_level[level])
+            max_stagger = ((n_at_level - 1) // 2) * 15 if n_at_level > 1 else 0
+            base_y = level_y_base.get(level, 0)
+            level_y_positions[level] = {
+                'base': base_y,
+                'min_y': base_y - max_stagger - 15,
+                'max_y': base_y + max_stagger + 15
+            }
     
     return {
         "nodes": nodes,
         "edges": edges,
+        "level_y_positions": level_y_positions,
         "num_parents": data["num_parents"],
         "num_children": data["num_children"],
         "num_bypass_edges": data["num_bypass_edges"]
@@ -174,7 +276,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             margin: 0;
         }
         .container {
-            max-width: 1200px;
+            max-width: 100%;
+            width: 100%;
             margin: 0 auto;
             border: 2px solid #FFFFFF;
             padding: 10px;
@@ -254,11 +357,107 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             font-weight: normal;
             padding: 6px;
         }
+        .main-content {
+            display: flex;
+            gap: 10px;
+            width: 100%;
+        }
+        .network-container {
+            flex: 0 0 60%;
+            width: 60%;
+        }
         #network {
             width: 100%;
-            height: 500px;
+            height: 600px;
             border: 2px solid #FFFFFF;
             background: #000000;
+            position: relative;
+        }
+        #networkOverlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .node-label {
+            dominant-baseline: central;
+            text-anchor: middle;
+            alignment-baseline: central;
+        }
+        .level-separator {
+            stroke: #333333;
+            stroke-width: 1;
+            stroke-dasharray: 5,5;
+            opacity: 0.5;
+        }
+        .proof-panel {
+            flex: 0 0 38%;
+            width: 38%;
+            height: 600px;
+            border: 2px solid #FFFFFF;
+            background: #000000;
+            display: flex;
+            flex-direction: column;
+        }
+        .proof-modal {
+            display: block;
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background-color: #000000;
+            overflow: auto;
+        }
+        .proof-modal.empty {
+            background-color: #000000;
+        }
+        .proof-modal-content {
+            background-color: #000000;
+            padding: 15px;
+            border: none;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        .proof-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #FFFFFF;
+            padding-bottom: 10px;
+        }
+        .proof-modal-title {
+            font-size: 16px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .proof-modal-close {
+            display: none; /* Hide close button since panel is always visible */
+        }
+        .proof-content {
+            font-family: 'Courier New', monospace;
+            font-size: 10px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            line-height: 1.5;
+            flex: 1;
+            overflow: auto;
+        }
+        .proof-statement {
+            color: #FFFFFF;
+            margin-bottom: 10px;
+            padding: 8px;
+            border-left: 2px solid #FFFFFF;
+            font-weight: bold;
+        }
+        .proof-text {
+            color: #CCCCCC;
+            font-size: 9px;
         }
         .legend {
             margin-top: 10px;
@@ -303,7 +502,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <select id="theoremSelect" onchange="updateNetwork()">
                 <option value="">-- SELECT --</option>
             </select>
-            <button id="distanceToggle" class="toggle-button active" onclick="toggleDistance()">DISTANCE 2</button>
+            <button id="distanceToggle" class="toggle-button active" onclick="cycleDistance()">DISTANCE 2</button>
         </div>
         
         <div class="info note" style="margin-bottom: 10px;">
@@ -315,7 +514,29 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <span id="infoText"></span>
         </div>
         
-        <div id="network"></div>
+        <div id="focusedNode" style="margin-top: 10px; padding: 8px; border: 2px solid #FFFFFF; background: #000000; font-weight: bold; font-size: 14px; min-height: 20px;">
+            <span style="text-transform: uppercase;">FOCUSED:</span> <span id="focusedNodeName" style="color: #FFFFFF;">--</span>
+        </div>
+        
+        <div class="main-content">
+            <div class="network-container">
+                <div id="network"></div>
+                <svg id="networkOverlay" width="100%" height="100%"></svg>
+            </div>
+            
+            <!-- Proof Panel - Always visible on right side -->
+            <div id="proofModal" class="proof-panel empty">
+                <div class="proof-modal-content">
+                    <div class="proof-modal-header">
+                        <div class="proof-modal-title" id="proofModalTitle">THEOREM PROOF</div>
+                    </div>
+                    <div class="proof-content">
+                        <div class="proof-statement" id="proofStatement">-- NO THEOREM SELECTED --</div>
+                        <div class="proof-text" id="proofText"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
         
         <div class="legend">
             <div class="legend-title">LEGEND</div>
@@ -342,6 +563,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let network = null;
         let allTheorems = [];
         let currentDistance = 2; // Default to distance 2
+        let levelSeparators = []; // Store level separator y-positions
+        let currentNodeDataSet = null; // Store current node dataset
+        let hoveredNodeId = null; // Track currently hovered node
+        let nodeLabels = {}; // Store label elements for opacity control
         
         // Load theorem list on page load
         fetch('/api/theorems')
@@ -358,20 +583,70 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 });
             });
         
-        function toggleDistance() {
-            currentDistance = currentDistance === 1 ? 2 : 1;
+        function cycleDistance() {
+            // Cycle: 2 -> 3 -> 1 -> 2 -> ...
+            if (currentDistance === 2) {
+                currentDistance = 3;
+            } else if (currentDistance === 3) {
+                currentDistance = 1;
+            } else {
+                currentDistance = 2;
+            }
+            updateDistanceButton();
+            updateNetwork();
+        }
+        
+        function updateDistanceButton() {
             const button = document.getElementById('distanceToggle');
             button.textContent = `DISTANCE ${currentDistance}`;
-            button.classList.toggle('active', currentDistance === 2);
-            updateNetwork();
+            button.classList.add('active'); // Always active since it's the only button
         }
         
         // Initialize button state on page load
         window.addEventListener('DOMContentLoaded', function() {
-            const button = document.getElementById('distanceToggle');
-            button.textContent = `DISTANCE ${currentDistance}`;
-            button.classList.toggle('active', currentDistance === 2);
+            updateDistanceButton();
         });
+        
+        function closeProofModal() {
+            // Clear the modal content but keep it visible
+            document.getElementById('proofModalTitle').textContent = 'THEOREM PROOF';
+            document.getElementById('proofStatement').textContent = '-- NO THEOREM SELECTED --';
+            document.getElementById('proofText').textContent = '';
+            document.getElementById('proofModal').classList.add('empty');
+        }
+        
+        // Store the central theorem for auto-selection
+        let centralTheoremNode = null;
+        
+        function showProof(theoremName) {
+            if (!theoremName) {
+                closeProofModal();
+                return;
+            }
+            
+            // Remove empty class to show content
+            document.getElementById('proofModal').classList.remove('empty');
+            
+            fetch(`/api/theorem/${encodeURIComponent(theoremName)}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('proofModalTitle').textContent = theoremName;
+                        document.getElementById('proofStatement').textContent = data.statement || '(No statement available)';
+                        document.getElementById('proofText').textContent = data.proof_text || data.code || '(No proof available)';
+                    } else {
+                        document.getElementById('proofModalTitle').textContent = theoremName;
+                        document.getElementById('proofStatement').textContent = '-- NOT FOUND --';
+                        document.getElementById('proofText').textContent = data.error || 'Theorem not found in corpus';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('proofModalTitle').textContent = theoremName;
+                    document.getElementById('proofStatement').textContent = '-- ERROR --';
+                    document.getElementById('proofText').textContent = 'Error loading proof: ' + error.message;
+                });
+        }
         
         function updateNetwork() {
             const select = document.getElementById('theoremSelect');
@@ -385,30 +660,52 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     network = null;
                 }
                 infoDiv.style.display = 'none';
+                centralTheoremNode = null;
+                // Clear proof modal when no theorem selected
+                closeProofModal();
                 return;
             }
             
+            // Set central theorem for auto-selection
+            centralTheoremNode = theorem;
+            
             // Fetch ego network data with current distance
             fetch(`/api/ego/${encodeURIComponent(theorem)}/${currentDistance}`)
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     if (!data.success) {
-                        alert('Error loading network data');
+                        console.error('API error:', data.error || 'Unknown error');
+                        alert('Error loading network data: ' + (data.error || 'Unknown error'));
                         return;
                     }
                     
-                    // Process nodes: ensure level property is set for vis-network hierarchical layout
-                    const processedNodes = data.network.nodes.map(node => {
-                        const processedNode = {...node};
-                        // vis-network hierarchical layout uses 'level' property
-                        if (processedNode.level === undefined) {
-                            processedNode.level = 2; // Default to central level
-                        }
-                        return processedNode;
+                    if (!data.network || !data.network.nodes || !data.network.edges) {
+                        console.error('Invalid network data structure:', data);
+                        alert('Error: Invalid network data structure');
+                        return;
+                    }
+                    
+                    // Use nodes with fixed positions from NetworkX layout
+                    const nodes = new vis.DataSet(data.network.nodes);
+                    const edges = new vis.DataSet(data.network.edges);
+                    
+                    // Prepare nodes with labels outside (dots with text)
+                    const nodesWithLabels = nodes.get().map(node => {
+                        return {
+                            ...node,
+                            label: "",  // No label on node
+                            shape: "dot",
+                            size: 8,
+                            font: { size: 0 }
+                        };
                     });
                     
-                    const nodes = new vis.DataSet(processedNodes);
-                    const edges = new vis.DataSet(data.network.edges);
+                    currentNodeDataSet = new vis.DataSet(nodesWithLabels);
                     
                     const container = document.getElementById('network');
                     
@@ -416,21 +713,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         network.destroy();
                     }
                     
-                    const maxLevel = Math.max(...processedNodes.map(n => n.level || 2));
-                    const levelSeparation = maxLevel > 3 ? 70 : 90;
-                    
                     const options = {
                         nodes: {
                             borderWidth: 2,
                             shadow: false,
+                            shape: "dot",
+                            size: 8,
                             font: {
-                                size: 10,
-                                face: 'Courier New'
-                            },
-                            size: 18,
-                            fixed: {
-                                x: false,
-                                y: false
+                                size: 0  // No font on node
                             }
                         },
                         edges: {
@@ -453,16 +743,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         },
                         layout: {
                             hierarchical: {
-                                enabled: true,
-                                direction: 'UD',
-                                sortMethod: 'directed',
-                                levelSeparation: levelSeparation,
-                                nodeSpacing: 60,
-                                treeSpacing: 80,
-                                blockShifting: true,
-                                edgeMinimization: true,
-                                parentCentralization: true,
-                                shakeTowards: 'leaves'
+                                enabled: false
                             }
                         },
                         physics: {
@@ -472,31 +753,329 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                             hover: true,
                             tooltipDelay: 100,
                             zoomView: true,
-                            dragView: true
+                            dragView: true,
+                            hoverConnectedEdges: false
                         }
                     };
                     
-                    network = new vis.Network(container, {nodes: nodes, edges: edges}, options);
+                    network = new vis.Network(container, {nodes: currentNodeDataSet, edges: edges}, options);
                     
-                    // Update info
-                    const distanceText = currentDistance === 2 ? ' (DISTANCE 2)' : '';
-                    infoText.innerHTML = `
-                        PARENTS: <strong>${data.network.num_parents}</strong> | 
-                        CHILDREN: <strong>${data.network.num_children}</strong> | 
-                        BYPASS EDGES: <strong>${data.network.num_bypass_edges}</strong> | 
-                        TOTAL NODES: <strong>${data.network.nodes.length}</strong> | 
-                        TOTAL EDGES: <strong>${data.network.edges.length}</strong>${distanceText}
-                    `;
-                    infoDiv.style.display = 'block';
+                    // Find the central theorem node (the one we're showing ego network for)
+                    centralTheoremNode = theorem; // This is the theorem selected in the dropdown
                     
+                    // Auto-select the central theorem immediately
+                    showProof(centralTheoremNode);
+                    hoveredNodeId = centralTheoremNode;
+                    updateFocusedNode(centralTheoremNode);
+                    
+                    // Draw labels immediately and on events
+                    function drawLabelsAndSeparators() {
+                        if (currentNodeDataSet && network) {
+                            drawLevelSeparators(data.network.level_y_positions || {});
+                            drawNodeLabels(currentNodeDataSet, network);
+                            // Update opacity after drawing labels
+                            updateLabelOpacity();
+                        }
+                    }
+                    
+                    // Draw after a short delay to ensure network is initialized
+                    setTimeout(drawLabelsAndSeparators, 100);
+                    
+                    // Wait for network to be ready and draw again
                     network.once('stabilizationEnd', function() {
                         network.fit();
+                        setTimeout(() => {
+                            drawLabelsAndSeparators();
+                        }, 200);
+                    });
+                    
+                    // Also draw when network is ready (alternative event)
+                    network.once('ready', function() {
+                        setTimeout(() => {
+                            drawLabelsAndSeparators();
+                        }, 100);
+                    });
+                    
+                    // Add hover handlers - labels are always visible, hover just makes them brighter
+                    network.on("hoverNode", function(params) {
+                        hoveredNodeId = params.node;
+                        updateFocusedNode(params.node);
+                        showProof(params.node); // Show proof for hovered node
+                        updateLabelOpacity(); // Makes hovered label brighter
+                    });
+                    
+                    network.on("blurNode", function(params) {
+                        // Return to central theorem if blurring
+                        if (params.node !== centralTheoremNode) {
+                            hoveredNodeId = centralTheoremNode;
+                            updateFocusedNode(centralTheoremNode);
+                            showProof(centralTheoremNode);
+                            updateLabelOpacity();
+                        }
+                    });
+                    
+                    // Add click handler for nodes
+                    network.on("click", function(params) {
+                        if (params.nodes.length > 0) {
+                            const nodeId = params.nodes[0];
+                            centralTheoremNode = nodeId; // Update central theorem to clicked node
+                            showProof(nodeId);
+                            hoveredNodeId = nodeId;
+                            updateFocusedNode(nodeId);
+                            updateLabelOpacity();
+                        }
+                    });
+                    
+                    // Update info
+                    let distanceText = '';
+                    if (currentDistance === 1) {
+                        distanceText = ' (DISTANCE 1)';
+                        infoText.innerHTML = `
+                            PARENTS (D1): <strong>${data.network.num_parents}</strong> | 
+                            CHILDREN (D1): <strong>${data.network.num_children}</strong> | 
+                            BYPASS EDGES: <strong>${data.network.num_bypass_edges}</strong> | 
+                            TOTAL NODES: <strong>${data.network.nodes.length}</strong> | 
+                            TOTAL EDGES: <strong>${data.network.edges.length}</strong>${distanceText}
+                        `;
+                    } else if (currentDistance === 2) {
+                        distanceText = ' (DISTANCE 2)';
+                        const parents2 = data.network.num_parents2 || 0;
+                        const children2 = data.network.num_children2 || 0;
+                        infoText.innerHTML = `
+                            PARENTS (D1): <strong>${data.network.num_parents}</strong> | 
+                            PARENTS (D2): <strong>${parents2}</strong> | 
+                            CHILDREN (D1): <strong>${data.network.num_children}</strong> | 
+                            CHILDREN (D2): <strong>${children2}</strong> | 
+                            TOTAL NODES: <strong>${data.network.nodes.length}</strong> | 
+                            TOTAL EDGES: <strong>${data.network.edges.length}</strong>${distanceText}
+                        `;
+                    } else {
+                        distanceText = ' (DISTANCE 3)';
+                        const parents2 = data.network.num_parents2 || 0;
+                        const children2 = data.network.num_children2 || 0;
+                        const parents3 = data.network.num_parents3 || 0;
+                        const children3 = data.network.num_children3 || 0;
+                        infoText.innerHTML = `
+                            PARENTS (D1): <strong>${data.network.num_parents}</strong> | 
+                            PARENTS (D2): <strong>${parents2}</strong> | 
+                            PARENTS (D3): <strong>${parents3}</strong> | 
+                            CHILDREN (D1): <strong>${data.network.num_children}</strong> | 
+                            CHILDREN (D2): <strong>${children2}</strong> | 
+                            CHILDREN (D3): <strong>${children3}</strong> | 
+                            TOTAL NODES: <strong>${data.network.nodes.length}</strong> | 
+                            TOTAL EDGES: <strong>${data.network.edges.length}</strong>${distanceText}
+                        `;
+                    }
+                    infoDiv.style.display = 'block';
+                    
+                    // Redraw on zoom/pan/drag
+                    network.on("afterDrawing", function() {
+                        if (currentNodeDataSet && network) {
+                            drawLevelSeparators(data.network.level_y_positions || {});
+                            drawNodeLabels(currentNodeDataSet, network);
+                        }
+                    });
+                    
+                    network.on("dragEnd", function() {
+                        if (currentNodeDataSet && network) {
+                            setTimeout(() => {
+                                drawLevelSeparators(data.network.level_y_positions || {});
+                                drawNodeLabels(currentNodeDataSet, network);
+                            }, 10);
+                        }
                     });
                 })
                 .catch(error => {
-                    console.error('Error:', error);
-                    alert('Error loading network data');
+                    console.error('Error loading network data:', error);
+                    alert('Error loading network data: ' + error.message);
                 });
+        }
+        
+        function drawLevelSeparators(levelYPositions) {
+            const overlay = document.getElementById('networkOverlay');
+            const container = document.getElementById('network');
+            if (!overlay || !network || !container) return;
+            
+            // Clear previous separators (but keep node labels)
+            const existingSeparators = overlay.querySelectorAll('.level-separator');
+            existingSeparators.forEach(el => el.remove());
+            
+            const containerRect = container.getBoundingClientRect();
+            
+            // Draw separator lines between levels
+            // We'll draw these at fixed positions relative to the container
+            // since level separators are conceptual and don't need precise node alignment
+            const levels = Object.keys(levelYPositions).map(k => parseInt(k)).sort((a, b) => a - b);
+            for (let i = 0; i < levels.length - 1; i++) {
+                const level1 = levels[i];
+                const level2 = levels[i + 1];
+                const y1 = levelYPositions[level1].max_y;
+                const y2 = levelYPositions[level2].min_y;
+                const midY = (y1 + y2) / 2;
+                
+                // Convert network y coordinate to screen coordinate
+                try {
+                    const scale = network.getScale();
+                    const offset = network.getViewPosition();
+                    const screenY = (midY - offset.y) * scale + containerRect.height / 2;
+                    
+                    if (screenY >= 0 && screenY <= containerRect.height) {
+                        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                        line.setAttribute('x1', '0');
+                        line.setAttribute('y1', screenY);
+                        line.setAttribute('x2', containerRect.width);
+                        line.setAttribute('y2', screenY);
+                        line.setAttribute('class', 'level-separator');
+                        overlay.appendChild(line);
+                    }
+                } catch (e) {
+                    // Skip separator if coordinate conversion fails
+                    console.warn('Failed to draw separator line:', e);
+                }
+            }
+        }
+        
+        function drawNodeLabels(nodesDataSet, network) {
+            const overlay = document.getElementById('networkOverlay');
+            const container = document.getElementById('network');
+            if (!overlay || !network || !container) {
+                console.warn('drawNodeLabels: Missing overlay, network, or container');
+                return;
+            }
+            
+            // Ensure overlay has correct dimensions
+            const containerRect = container.getBoundingClientRect();
+            overlay.setAttribute('width', containerRect.width);
+            overlay.setAttribute('height', containerRect.height);
+            
+            // Clear previous labels (but keep separators)
+            const existingLabels = overlay.querySelectorAll('.node-label');
+            existingLabels.forEach(el => el.remove());
+            nodeLabels = {}; // Reset label storage
+            
+            // Get actual rendered positions from vis-network
+            let positions;
+            try {
+                positions = network.getPositions();
+            } catch (e) {
+                console.error('Error getting positions:', e);
+                return;
+            }
+            
+            if (!positions || Object.keys(positions).length === 0) {
+                console.warn('No positions available from network, trying fallback');
+                // Fallback: use node.x and node.y directly
+            }
+            
+            const scale = network.getScale();
+            const offset = network.getViewPosition();
+            
+            const nodes = nodesDataSet.get();
+            let labelsCreated = 0;
+            
+            nodes.forEach(node => {
+                const labelText = node.labelText || node.title || node.id;
+                if (!labelText) return;
+                
+                // Get the actual rendered position
+                let nodePos = null;
+                if (positions && positions[node.id]) {
+                    nodePos = positions[node.id];
+                } else if (node.x !== undefined && node.y !== undefined) {
+                    // Fallback to stored position
+                    nodePos = {x: node.x, y: node.y};
+                } else {
+                    return; // Skip if no position available
+                }
+                
+                // Convert network coordinates to screen coordinates
+                // vis-network uses center-based coordinate system
+                const labelX = (nodePos.x - offset.x) * scale + containerRect.width / 2;
+                let labelY = (nodePos.y - offset.y) * scale + containerRect.height / 2;
+                
+                // Move labels down to align with node centers
+                // SVG text y coordinate positioning needs adjustment
+                // With dominant-baseline: central, the y should be at center, but we need to offset down
+                labelY = labelY + 235; // Offset down by 235px to align with node center
+                
+                // Only draw if visible within container bounds (with generous margin)
+                if (labelX < -200 || labelX > containerRect.width + 200 || labelY < -200 || labelY > containerRect.height + 200) {
+                    return;
+                }
+                
+                // Create text element - position exactly at node center
+                // Use 'central' for dominant-baseline to properly center text vertically
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', labelX);
+                text.setAttribute('y', labelY);
+                text.setAttribute('class', 'node-label');
+                text.setAttribute('data-node-id', node.id);
+                text.setAttribute('fill', '#FFFFFF');
+                text.setAttribute('font-family', 'Courier New, monospace');
+                text.setAttribute('font-size', '10px');
+                text.setAttribute('text-anchor', 'middle');
+                text.setAttribute('pointer-events', 'none');
+                text.setAttribute('opacity', '0.5'); // Faint but visible default opacity for all labels
+                text.setAttribute('dominant-baseline', 'central'); // Use 'central' to center text vertically
+                text.setAttribute('alignment-baseline', 'central'); // Additional alignment property
+                text.textContent = labelText;
+                overlay.appendChild(text);
+                
+                // Store reference for opacity updates
+                nodeLabels[node.id] = text;
+                labelsCreated++;
+                
+                // Debug: log first few labels to verify they're being created
+                if (labelsCreated <= 3) {
+                    console.log(`Label ${labelsCreated} for ${node.id.substring(0, 30)}: x=${labelX.toFixed(1)}, y=${labelY.toFixed(1)}, text="${labelText.substring(0, 30)}"`);
+                }
+            });
+            
+            console.log(`Created ${labelsCreated} labels out of ${nodes.length} nodes`);
+            
+            // Update opacity based on hover state (hovered node becomes fully visible)
+            updateLabelOpacity();
+        }
+        
+        function updateFocusedNode(nodeId) {
+            const focusedNodeNameEl = document.getElementById('focusedNodeName');
+            if (!focusedNodeNameEl) return;
+            
+            if (nodeId && currentNodeDataSet) {
+                try {
+                    const node = currentNodeDataSet.get(nodeId);
+                    if (node) {
+                        const labelText = node.labelText || node.title || node.id;
+                        focusedNodeNameEl.textContent = labelText;
+                        focusedNodeNameEl.style.color = '#FFFFFF';
+                    } else {
+                        focusedNodeNameEl.textContent = '--';
+                    }
+                } catch (e) {
+                    console.error('Error updating focused node:', e);
+                    focusedNodeNameEl.textContent = '--';
+                }
+            } else {
+                focusedNodeNameEl.textContent = '--';
+            }
+        }
+        
+        function updateLabelOpacity() {
+            // All labels are visible, but hovered one is brighter
+            Object.keys(nodeLabels).forEach(nodeId => {
+                const label = nodeLabels[nodeId];
+                if (label) {
+                    if (nodeId === hoveredNodeId) {
+                        label.setAttribute('opacity', '1.0'); // Full opacity for hovered
+                        label.setAttribute('font-weight', 'bold');
+                        label.setAttribute('font-size', '11px');
+                    } else {
+                        label.setAttribute('opacity', '0.5'); // Faint but visible for all others
+                        label.setAttribute('font-weight', 'normal');
+                        label.setAttribute('font-size', '10px');
+                    }
+                }
+            });
         }
     </script>
 </body>
@@ -562,6 +1141,42 @@ def get_ego_network_with_distance(theorem, distance=1):
     return jsonify({"success": True, "network": network_data})
 
 
+@app.route('/api/theorem/<theorem>')
+def get_theorem_proof(theorem):
+    """API endpoint to get theorem code from corpus."""
+    if not corpus_code_index:
+        return jsonify({"success": False, "error": "Corpus code index not loaded. Run 00_corpus_to_code.py first."})
+    
+    code = corpus_code_index.get(theorem, "")
+    
+    if code:
+        # Try to extract statement from code (basic parsing)
+        statement = ""
+        if code.startswith("theorem"):
+            # Extract statement part (everything before :=)
+            parts = code.split(":=", 1)
+            if len(parts) > 0:
+                statement = parts[0].strip()
+        elif code.startswith("def"):
+            parts = code.split(":=", 1)
+            if len(parts) > 0:
+                statement = parts[0].strip()
+        elif code.startswith("class"):
+            parts = code.split("where", 1)
+            if len(parts) > 0:
+                statement = parts[0].strip()
+        
+        return jsonify({
+            "success": True,
+            "statement": statement,
+            "proof_text": code,  # Full code including proof
+            "code": code,
+            "proof_type": "corpus"  # Indicates it's from corpus
+        })
+    else:
+        return jsonify({"success": False, "error": f"Theorem '{theorem}' not found in corpus"})
+
+
 def generate_ego_network_for_theorem(theorem, G, distance=1):
     """Generate ego network data for a theorem with specified distance."""
     Out = {n: set(G.successors(n)) for n in G.nodes()}
@@ -576,23 +1191,18 @@ def generate_ego_network_for_theorem(theorem, G, distance=1):
         ego_nodes.update(parents)
         ego_nodes.update(children)
         
-        # Collect edges: parent->theorem, theorem->child, parent->child
+        # Collect ALL edges between any ego nodes (complete subgraph)
         edges = []
-        for p in parents:
-            if (p, theorem) in all_edges_set:
-                edges.append({"from": p, "to": theorem})
-        for c in children:
-            if (theorem, c) in all_edges_set:
-                edges.append({"from": theorem, "to": c})
-        for p in parents:
-            for c in children:
-                if (p, c) in all_edges_set:
-                    edges.append({"from": p, "to": c})
+        for u in ego_nodes:
+            for v in ego_nodes:
+                if (u, v) in all_edges_set and u != v:
+                    edges.append({"from": u, "to": v})
         
-        num_parents = len(parents)
-        num_children = len(children)
+        num_parents = len(parents)  # Direct parents (distance 1)
+        num_children = len(children)  # Direct children (distance 1)
+        # Count bypass edges (parent->child edges that skip the central theorem)
         num_bypass = sum(1 for p in parents for c in children if (p, c) in all_edges_set)
-    else:
+    elif distance == 2:
         # Distance-2: include parents of parents and children of children
         parents = set(In[theorem])
         children = set(Out[theorem])
@@ -608,6 +1218,8 @@ def generate_ego_network_for_theorem(theorem, G, distance=1):
         for c in children:
             children2.update(Out[c])
         children2.discard(theorem)  # Remove self
+        # Exclude nodes that are already in parents, children, or parents2 (they're distance 1 or 2 upstream)
+        children2 = children2 - parents - children - parents2
         
         ego_nodes = set([theorem])
         ego_nodes.update(parents)
@@ -622,13 +1234,205 @@ def generate_ego_network_for_theorem(theorem, G, distance=1):
                 if (u, v) in all_edges_set and u != v:
                     edges.append({"from": u, "to": v})
         
+        num_parents = len(parents)  # Direct parents (distance 1)
+        num_children = len(children)  # Direct children (distance 1)
+        num_parents2 = len(parents2)  # Grandparents (distance 2 upstream)
+        num_children2 = len(children2)  # Grandchildren (distance 2 downstream)
+        num_bypass = 0  # Not meaningful for distance 2
+    else:
+        # Distance 3: include up to 3 hops
+        parents = set(In[theorem])
+        children = set(Out[theorem])
+        
+        # Parents of parents (distance 2 upstream)
+        parents2 = set()
+        for p in parents:
+            parents2.update(In[p])
+        parents2.discard(theorem)
+        
+        # Parents of parents2 (distance 3 upstream)
+        parents3 = set()
+        for p2 in parents2:
+            parents3.update(In[p2])
+        parents3.discard(theorem)
+        parents3 = parents3 - parents - parents2  # Exclude already counted
+        
+        # Children of children (distance 2 downstream)
+        children2 = set()
+        for c in children:
+            children2.update(Out[c])
+        children2.discard(theorem)
+        children2 = children2 - parents - children - parents2 - parents3
+        
+        # Children of children2 (distance 3 downstream)
+        children3 = set()
+        for c2 in children2:
+            children3.update(Out[c2])
+        children3.discard(theorem)
+        children3 = children3 - parents - children - parents2 - parents3 - children2
+        
+        ego_nodes = set([theorem])
+        ego_nodes.update(parents)
+        ego_nodes.update(children)
+        ego_nodes.update(parents2)
+        ego_nodes.update(children2)
+        ego_nodes.update(parents3)
+        ego_nodes.update(children3)
+        
+        # Collect ALL edges between any ego nodes
+        edges = []
+        for u in ego_nodes:
+            for v in ego_nodes:
+                if (u, v) in all_edges_set and u != v:
+                    edges.append({"from": u, "to": v})
+        
         num_parents = len(parents)
         num_children = len(children)
-        num_bypass = 0  # Not meaningful for distance 2
+        num_parents2 = len(parents2)
+        num_children2 = len(children2)
+        num_parents3 = len(parents3)
+        num_children3 = len(children3)
+        num_bypass = 0
     
-    # Create node data with topological levels for staggering
+    # Filter nodes and edges based on distance before building layout
+    if distance == 1:
+        # For distance 1, only include: theorem, parents, children
+        filtered_nodes = set([theorem])
+        filtered_nodes.update(parents)
+        filtered_nodes.update(children)
+        # Filter edges to only include edges between filtered nodes
+        filtered_edges = [e for e in edges if e["from"] in filtered_nodes and e["to"] in filtered_nodes]
+    elif distance == 2:
+        # For distance 2, include: theorem, parents, children, parents2, children2
+        filtered_nodes = set([theorem])
+        filtered_nodes.update(parents)
+        filtered_nodes.update(children)
+        filtered_nodes.update(parents2)
+        filtered_nodes.update(children2)
+        filtered_edges = [e for e in edges if e["from"] in filtered_nodes and e["to"] in filtered_nodes]
+    else:
+        # For distance 3, include all nodes
+        filtered_nodes = ego_nodes
+        filtered_edges = edges
+    
+    # Build NetworkX subgraph for layout computation (using filtered nodes/edges)
+    ego_subgraph = nx.DiGraph()
+    ego_subgraph.add_nodes_from(filtered_nodes)
+    for edge in filtered_edges:
+        ego_subgraph.add_edge(edge["from"], edge["to"])
+    
+    # Compute x-coordinates using NetworkX layout (using filtered nodes)
+    if len(filtered_nodes) > 1:
+        try:
+            # Use spring_layout to bring connected nodes closer horizontally
+            pos = nx.spring_layout(ego_subgraph, k=1.5, iterations=50, seed=42)
+        except:
+            # Fallback to circular layout if spring_layout fails
+            pos = nx.circular_layout(ego_subgraph)
+    else:
+        pos = {list(filtered_nodes)[0]: (0, 0)} if filtered_nodes else {}
+    
+    # Group nodes by level for y-coordinate computation (using filtered nodes)
+    nodes_by_level = {}
+    for node in filtered_nodes:
+        if node == theorem:
+            level = 2  # Central node
+        elif distance == 1:
+            if node in parents:
+                level = 1  # Parents
+            else:
+                level = 3  # Children
+        elif distance == 2:
+            # Distance 2: 5 levels
+            if node in parents2:
+                level = 0  # Grandparents
+            elif node in parents:
+                level = 1  # Parents
+            elif node in children:
+                level = 3  # Children
+            else:  # children2
+                level = 4  # Grandchildren
+        else:
+            # Distance 3: 7 levels
+            if node in parents3:
+                level = -1  # Great-grandparents
+            elif node in parents2:
+                level = 0  # Grandparents
+            elif node in parents:
+                level = 1  # Parents
+            elif node in children:
+                level = 3  # Children
+            elif node in children2:
+                level = 4  # Grandchildren
+            else:  # children3
+                level = 5  # Great-grandchildren
+        
+        if level not in nodes_by_level:
+            nodes_by_level[level] = []
+        nodes_by_level[level].append(node)
+    
+    # Compute y-coordinates: base y per level + slight staggering within level
+    # Ensure levels never overlap by using larger separation
+    if distance == 1:
+        level_y_base = {1: -150, 2: 0, 3: 150}  # Base y positions for distance 1
+        level_separation = 150
+    elif distance == 2:
+        level_y_base = {0: -200, 1: -100, 2: 0, 3: 100, 4: 200}
+        level_separation = 100
+    else:  # distance 3
+        level_y_base = {-1: -300, 0: -200, 1: -100, 2: 0, 3: 100, 4: 200, 5: 300}
+        level_separation = 100
+    
+    level_y_spacing = 15  # Vertical stagger spacing within level (smaller than level separation)
+    node_positions = {}
+    
+    for level, nodes_at_level in nodes_by_level.items():
+        base_y = level_y_base.get(level, 0)
+        n_at_level = len(nodes_at_level)
+        for idx, node in enumerate(nodes_at_level):
+            # Stagger: alternate vertical offset within level, centered around base_y
+            if n_at_level == 1:
+                stagger_offset = 0
+            else:
+                # Simple alternating pattern: even indices slightly up, odd indices slightly down
+                if idx % 2 == 0:
+                    stagger_offset = (idx // 2) * level_y_spacing
+                else:
+                    stagger_offset = -((idx + 1) // 2) * level_y_spacing
+                # Center the stagger around base_y
+                if n_at_level > 1:
+                    max_offset = ((n_at_level - 1) // 2) * level_y_spacing
+                    if max_offset > 0:
+                        # Adjust to center around 0
+                        if idx % 2 == 0:
+                            stagger_offset = stagger_offset - max_offset / 2
+                        else:
+                            stagger_offset = stagger_offset + max_offset / 2
+            node_positions[node] = {
+                'x': pos[node][0] * 300 if node in pos else 0,  # Scale x-coordinates more (use more horizontal space)
+                'y': base_y + stagger_offset
+            }
+    
+    # Compute level_y_positions for separator lines
+    level_y_positions = {}
+    min_level = min(nodes_by_level.keys()) if nodes_by_level else 2
+    max_level = max(nodes_by_level.keys()) if nodes_by_level else 2
+    
+    for level in range(min_level, max_level + 1):
+        if level not in nodes_by_level:
+            continue
+        n_at_level = len(nodes_by_level[level])
+        max_stagger = ((n_at_level - 1) // 2) * level_y_spacing if n_at_level > 1 else 0
+        base_y = level_y_base.get(level, 0)
+        level_y_positions[level] = {
+            'base': base_y,
+            'min_y': base_y - max_stagger - 15,
+            'max_y': base_y + max_stagger + 15
+        }
+    
+    # Create node data with fixed positions (using filtered nodes)
     nodes = []
-    for node in ego_nodes:
+    for node in filtered_nodes:
         short_name = node.split('.')[-1] if '.' in node else node[:50]
         node_type = G.nodes[node].get("node_type", "unknown")
         
@@ -640,7 +1444,7 @@ def generate_ego_network_for_theorem(theorem, G, distance=1):
                 level = 1  # Parents
             else:
                 level = 3  # Children
-        else:
+        elif distance == 2:
             # Distance 2: 5 levels
             if node in parents2:
                 level = 0  # Grandparents
@@ -650,6 +1454,20 @@ def generate_ego_network_for_theorem(theorem, G, distance=1):
                 level = 3  # Children
             else:  # children2
                 level = 4  # Grandchildren
+        else:
+            # Distance 3: 7 levels
+            if node in parents3:
+                level = -1  # Great-grandparents
+            elif node in parents2:
+                level = 0  # Grandparents
+            elif node in parents:
+                level = 1  # Parents
+            elif node in children:
+                level = 3  # Children
+            elif node in children2:
+                level = 4  # Grandchildren
+            else:  # children3
+                level = 5  # Great-grandchildren
         
         # Brutalist dark theme
         if node == theorem:
@@ -665,30 +1483,61 @@ def generate_ego_network_for_theorem(theorem, G, distance=1):
             border_color = "#000000"
             shape = "ellipse"
         
-        nodes.append({
+        node_data = {
             "id": node,
-            "label": short_name,
-            "title": node,
+            "label": "",  # Empty label - we'll show text outside
+            "title": node,  # Full name in tooltip
             "color": {
                 "background": color,
                 "border": border_color
             },
-            "shape": shape,
+            "shape": "dot",  # Use dot shape
             "font": {
-                "size": 11 if node == theorem else 10,
-                "color": "#000000" if color == "#FFFFFF" else "#FFFFFF"
+                "size": 0  # No font for dot
             },
             "borderWidth": 2,
-            "level": level
-        })
+            "size": 8,  # Small dot size
+            "level": level,
+            "x": node_positions[node]["x"],
+            "y": node_positions[node]["y"],
+            "fixed": {"x": True, "y": True},
+            "labelText": short_name  # Store label text separately for custom rendering
+        }
+        nodes.append(node_data)
     
-    return {
-        "nodes": nodes,
-        "edges": edges,
-        "num_parents": num_parents,
-        "num_children": num_children,
-        "num_bypass_edges": num_bypass
-    }
+    if distance == 1:
+        return {
+            "nodes": nodes,
+            "edges": filtered_edges,
+            "level_y_positions": level_y_positions,  # For drawing separator lines
+            "num_parents": num_parents,
+            "num_children": num_children,
+            "num_bypass_edges": num_bypass
+        }
+    elif distance == 2:
+        return {
+            "nodes": nodes,
+            "edges": filtered_edges,
+            "level_y_positions": level_y_positions,  # For drawing separator lines
+            "num_parents": num_parents,
+            "num_children": num_children,
+            "num_parents2": num_parents2,
+            "num_children2": num_children2,
+            "num_bypass_edges": num_bypass
+        }
+    else:  # distance 3
+        return {
+            "nodes": nodes,
+            "edges": filtered_edges,
+            "level_y_positions": level_y_positions,  # For drawing separator lines
+            "num_parents": num_parents,
+            "num_children": num_children,
+            "num_parents2": num_parents2,
+            "num_children2": num_children2,
+            "num_parents3": num_parents3,
+            "num_children3": num_children3,
+            "num_bypass_edges": num_bypass
+        }
 
 
 @app.route('/lib/<path:filename>')
