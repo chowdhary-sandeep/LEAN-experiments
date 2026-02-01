@@ -39,6 +39,7 @@ OUTPUT_PDF_EGONETS = str(_SCRIPT_DIR / "theorem_premise_network_analysis_egonets
 OUTPUT_PNG_EGONETS = str(_SCRIPT_DIR / "theorem_premise_network_analysis_egonets.png")
 OUTPUT_PDF_MOTIFS = str(_SCRIPT_DIR / "theorem_premise_network_analysis_motifs.pdf")
 OUTPUT_PNG_MOTIFS = str(_SCRIPT_DIR / "theorem_premise_network_analysis_motifs.png")
+OUTPUT_HTML_DASHBOARD = str(_SCRIPT_DIR / "theorem_ego_network_dashboard.html")
 CACHE_DIR = _SCRIPT_DIR / "cache"
 CACHE_STAMP = CACHE_DIR / "stamp.json"
 CACHE_BUNDLE = CACHE_DIR / "bundle.pkl"
@@ -1852,6 +1853,11 @@ else:
     else:
         print("\nFeedback Arc Set: No edges removed (graph was already a DAG)")
     
+    # Generate ego network data before saving to cache
+    print("\nGenerating ego network data for dashboard cache...")
+    theorems_list_cache = [n for n in G_original.nodes() if G_original.nodes[n].get("node_type") == "theorem"]
+    ego_network_data_cache = generate_ego_network_data(G_original, theorems_list_cache)
+    
     # Save full bundle to cache (so next run can skip graph + measures + ego)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     _save_cache({
@@ -1864,6 +1870,8 @@ else:
         "total_theorems": total_theorems,
         "measures": measures,
         "ego_networks": ego_networks,
+        "ego_network_data": ego_network_data_cache,
+        "theorems_list": theorems_list_cache
     })
     print(f"  Cache saved to {CACHE_DIR} (next run will use it).")
 
@@ -2436,6 +2444,7 @@ print(f"    - PNG (ego nets): {OUTPUT_PNG_EGONETS}")
 if motif_counts:
     print(f"    - PDF (motifs): {OUTPUT_PDF_MOTIFS}")
     print(f"    - PNG (motifs): {OUTPUT_PNG_MOTIFS}")
+print(f"    - HTML Dashboard: {OUTPUT_HTML_DASHBOARD}")
 print(f"\n  Summary:")
 print(f"    - Nodes analyzed: {measures['basic']['nodes']:,}")
 print(f"    - Edges analyzed: {measures['basic']['edges']:,}")
@@ -2443,3 +2452,81 @@ print(f"    - Ego networks visualized: {len(ego_networks)}")
 print(f"    - Components: {measures['basic']['num_components']}")
 print(f"    - Max level: {measures['levels'].get('max_level', 'N/A')}")
 print(f"    - Max depth: {measures['paths'].get('max_depth', 'N/A')}")
+
+# ============================================================================
+# Generate HTML Dashboard for Interactive Ego Network Visualization
+# ============================================================================
+
+def generate_ego_network_data(G, theorems_list):
+    """
+    Generate ego network data for all theorems: parents, children, and all edges.
+    Returns a dictionary mapping theorem names to their ego network data.
+    """
+    print("\nGenerating ego network data for HTML dashboard...")
+    ego_data = {}
+    
+    Out = {n: set(G.successors(n)) for n in G.nodes()}
+    In = {n: set(G.predecessors(n)) for n in G.nodes()}
+    all_edges_set = set(G.edges())
+    
+    for theorem in theorems_list:
+        parents = list(In[theorem])
+        children = list(Out[theorem])
+        
+        # Collect all nodes in ego network
+        ego_nodes = set([theorem])
+        ego_nodes.update(parents)
+        ego_nodes.update(children)
+        
+        # Collect all edges:
+        # 1. Parent -> theorem
+        # 2. Theorem -> child
+        # 3. Parent -> child (bypass edges)
+        edges = []
+        
+        # Parent -> theorem edges
+        for parent in parents:
+            if (parent, theorem) in all_edges_set:
+                edges.append({"from": parent, "to": theorem})
+        
+        # Theorem -> child edges
+        for child in children:
+            if (theorem, child) in all_edges_set:
+                edges.append({"from": theorem, "to": child})
+        
+        # Parent -> child edges (bypass edges)
+        for parent in parents:
+            for child in children:
+                if (parent, child) in all_edges_set:
+                    edges.append({"from": parent, "to": child})
+        
+        # Create node data with labels and types
+        nodes = []
+        for node in ego_nodes:
+            short_name = node.split('.')[-1] if '.' in node else node[:50]
+            node_type = G.nodes[node].get("node_type", "unknown")
+            color = "#ff6b6b" if node == theorem else ("#4ecdc4" if node_type == "premise" else "#95e1d3")
+            shape = "box" if node == theorem else "ellipse"
+            
+            nodes.append({
+                "id": node,
+                "label": short_name,
+                "title": node,  # Full name on hover
+                "color": color,
+                "shape": shape,
+                "font": {"size": 14 if node == theorem else 12}
+            })
+        
+        ego_data[theorem] = {
+            "nodes": nodes,
+            "edges": edges,
+            "num_parents": len(parents),
+            "num_children": len(children),
+            "num_bypass_edges": sum(1 for p in parents for c in children if (p, c) in all_edges_set)
+        }
+    
+    print(f"  Generated ego network data for {len(ego_data)} theorems")
+    return ego_data
+
+
+# HTML generation removed - now handled by 0_egonetwork_MDL.py backend
