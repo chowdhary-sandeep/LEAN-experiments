@@ -23,8 +23,8 @@ except ImportError:
     def tqdm(iterable, desc="", total=None):
         return iterable
 
-# Set UTF-8 encoding for stdout on Windows
-if sys.platform == 'win32':
+# Set UTF-8 encoding for stdout on Windows (skip in Jupyter - stdout has no .buffer)
+if sys.platform == 'win32' and hasattr(sys.stdout, 'buffer'):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 # Configuration
@@ -176,6 +176,85 @@ print(f"\nTop 10 theorems by incoming edges (use most premises):")
 for name, count in top_theorems_by_in:
     short_name = name.split('.')[-1] if '.' in name else name
     print(f"  {short_name[:60]}: {count} premises")
+
+# ============================================================================
+# Examples of unresolved lemmas (10 examples with confidence scores)
+# ============================================================================
+print("\n" + "=" * 80)
+print("Examples of unresolved lemmas (10 examples with confidence scores)")
+print("=" * 80)
+
+unresolved_examples = []  # list of (full_name, confidence, resolution_method, example_theorem)
+seen_unresolved = set()
+
+with open(DATA_FILE, "r", encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("proof_type") != "tactic":
+            continue
+        theorem_name = entry.get("full_name", "")
+        for tac in entry.get("tactics", []):
+            for p in tac.get("premises", []):
+                conf = p.get("confidence", 1.0)
+                full_name = p.get("full_name", "") or p.get("surface_name", "")
+                if not full_name:
+                    continue
+                # Treat as unresolved if confidence is 0 or very low
+                if conf == 0.0 or (conf < 0.5 and full_name not in seen_unresolved):
+                    seen_unresolved.add(full_name)
+                    method = p.get("resolution_method", "unknown")
+                    unresolved_examples.append((full_name, conf, method, theorem_name))
+                    if len(unresolved_examples) >= 10:
+                        break
+            if len(unresolved_examples) >= 10:
+                break
+        if len(unresolved_examples) >= 10:
+            break
+
+# If we have fewer than 10 from strict unresolved, add low-confidence examples
+if len(unresolved_examples) < 10:
+    seen = {x[0] for x in unresolved_examples}
+    with open(DATA_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if entry.get("proof_type") != "tactic":
+                continue
+            theorem_name = entry.get("full_name", "")
+            for tac in entry.get("tactics", []):
+                for p in tac.get("premises", []):
+                    conf = p.get("confidence", 1.0)
+                    full_name = p.get("full_name", "") or p.get("surface_name", "")
+                    if full_name and full_name not in seen and conf < 1.0:
+                        seen.add(full_name)
+                        method = p.get("resolution_method", "unknown")
+                        unresolved_examples.append((full_name, conf, method, theorem_name))
+                        if len(unresolved_examples) >= 10:
+                            break
+                if len(unresolved_examples) >= 10:
+                    break
+            if len(unresolved_examples) >= 10:
+                break
+
+for i, (full_name, conf, method, thm) in enumerate(unresolved_examples[:10], 1):
+    short_lemma = full_name.split('.')[-1] if '.' in full_name else full_name
+    short_thm = (thm.split('.')[-1] if thm and '.' in thm else (thm or ""))[:50]
+    full_display = full_name[:70] + ("..." if len(full_name) > 70 else "")
+    print(f"  {i}. lemma: {full_display}")
+    print(f"     confidence: {conf:.4f}  resolution: {method}  example theorem: {short_thm}")
+if not unresolved_examples:
+    print("  (No unresolved lemma examples found in data.)")
 
 # Save original graph for analysis (before node removal)
 G_original = G.copy()

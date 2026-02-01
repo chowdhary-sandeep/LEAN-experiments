@@ -167,6 +167,27 @@ def infer_open_namespaces(file_path: str, theorem_name: str) -> list:
 
 
 # =============================================================================
+# CORPUS EXPORT (so all 4 files can be built in output_dir)
+# =============================================================================
+def _export_corpus(traced_repo, output_dir: str) -> None:
+    """Export premise definitions to output_dir/corpus.jsonl so resolver can load it."""
+    import os
+    import networkx as nx
+    oup_path = os.path.join(output_dir, CORPUS_FILE)
+    num_premises = 0
+    with open(oup_path, "w", encoding="utf-8") as oup:
+        G = traced_repo.traced_files_graph
+        tf_nodes = list(reversed(list(nx.topological_sort(G))))
+        for tf_node in tf_nodes:
+            tf = G.nodes[tf_node]["traced_file"]
+            imports = [str(_) for _ in G.successors(tf_node)]
+            premises = tf.get_premise_definitions()
+            num_premises += len(premises)
+            oup.write(json.dumps({"path": str(tf.path), "imports": imports, "premises": premises}, ensure_ascii=False) + "\n")
+    print(f"  Exported {num_premises:,} premises to {oup_path}")
+
+
+# =============================================================================
 # PREMISE RESOLUTION
 # =============================================================================
 class PremiseResolver:
@@ -360,29 +381,48 @@ def extract_surface_premises(tactic: str) -> list:
 # =============================================================================
 # MAIN BUILD FUNCTION
 # =============================================================================
-def build_unified_v2(traced_repo, output_file: str = OUTPUT_FILE, 
+def build_unified_v2(traced_repo, output_file: str = None,
                      corpus_file: str = CORPUS_FILE,
-                     max_theorems: int = None):
+                     max_theorems: int = None,
+                     output_dir: str = None):
     """
     Build unified traced theorems file from LeanDojo traced_repo.
     
     Args:
         traced_repo: LeanDojo TracedRepo object
-        output_file: Output JSONL file path
+        output_file: Output JSONL file path (default: under output_dir or cwd)
         corpus_file: Corpus file for premise resolution
         max_theorems: Limit number of theorems (for testing)
+        output_dir: If set, output_file and stats file are written under this dir (e.g. "00_experiment1" or ".")
     
     Returns:
         dict with statistics
     """
     from tqdm import tqdm
-    
+    import os
+
+    if output_dir is not None:
+        os.makedirs(output_dir, exist_ok=True)
+        out_file = os.path.join(output_dir, OUTPUT_FILE) if output_file is None else output_file
+        stats_file = os.path.join(output_dir, STATS_FILE)
+        # Look for corpus in output_dir so all 4 files (corpus, unified, stats, premise_index) can live there
+        corpus_file_used = os.path.join(output_dir, CORPUS_FILE)
+    else:
+        out_file = output_file if output_file is not None else OUTPUT_FILE
+        stats_file = STATS_FILE
+        corpus_file_used = corpus_file
+
     print("="*70)
     print("BUILDING UNIFIED TRACED THEOREMS (v2)")
     print("="*70)
-    
-    # Initialize resolver
-    resolver = PremiseResolver(corpus_file)
+    if output_dir:
+        print(f"Output directory: {output_dir}")
+        # Build corpus.jsonl in output_dir first (file 1 of 4)
+        print("\nExporting corpus (corpus.jsonl)...")
+        _export_corpus(traced_repo, output_dir)
+
+    # Initialize resolver (uses corpus in output_dir when output_dir is set)
+    resolver = PremiseResolver(corpus_file_used)
     
     # Collect all traced theorems
     print("\nCollecting traced theorems...")
@@ -411,7 +451,7 @@ def build_unified_v2(traced_repo, output_file: str = OUTPUT_FILE,
     print(f"\nProcessing theorems...")
     t0 = time.time()
     
-    with open(output_file, "w", encoding="utf-8") as f:
+    with open(out_file, "w", encoding="utf-8") as f:
         for tt in tqdm(all_theorems, desc="Building unified"):
             stats["total_theorems"] += 1
             
@@ -573,8 +613,14 @@ def build_unified_v2(traced_repo, output_file: str = OUTPUT_FILE,
                 "proof_type": proof_type,
                 "proof_text": proof_text,
                 "tactics": tactics_list,
-                "all_premises": {k: {"count": v["count"], "tactics": v["tactics"]} 
-                                 for k, v in all_premises.items()},
+                "all_premises": {
+                    k: {
+                        "count": v["count"],
+                        "tactics": v["tactics"],
+                        "avg_confidence": round(v["confidence_sum"] / max(1, v["count"]), 4)
+                    }
+                    for k, v in all_premises.items()
+                },
                 "metrics": metrics,
                 "quality": {
                     "has_statement": bool(statement),
@@ -596,7 +642,7 @@ def build_unified_v2(traced_repo, output_file: str = OUTPUT_FILE,
     print(f"\n{'='*70}")
     print("SUMMARY")
     print("="*70)
-    print(f"Output: {output_file}")
+    print(f"Output: {out_file}")
     print(f"Time: {elapsed:.1f}s")
     print(f"\nTheorems: {stats['total_theorems']:,}")
     print(f"  Tactic proofs: {stats['tactic_proofs']:,}")
@@ -611,10 +657,22 @@ def build_unified_v2(traced_repo, output_file: str = OUTPUT_FILE,
     print(f"  High (>=0.6): {stats['high_confidence']:,}")
     print(f"  Low (<0.6): {stats['low_confidence']:,}")
     
-    # Save stats
-    with open(STATS_FILE, "w", encoding="utf-8") as f:
+    # Save stats (file 3 of 4)
+    with open(stats_file, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2, ensure_ascii=False)
-    print(f"\nStats saved to: {STATS_FILE}")
+    print(f"\nStats saved to: {stats_file}")
+
+    # Save premise index in output_dir when set (file 4 of 4)
+    if output_dir is not None:
+        premise_index_path = os.path.join(output_dir, PREMISE_INDEX_FILE)
+        with open(premise_index_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "premises": sorted(resolver.corpus_index["_exact_"]),
+                "by_suffix": {k: v for k, v in resolver.by_suffix.items()},
+                "num_premises": len(resolver.corpus_index["_exact_"]),
+                "num_suffixes": len(resolver.by_suffix),
+            }, f, indent=2, ensure_ascii=False)
+        print(f"Premise index saved to: {premise_index_path}")
     
     return stats
 
