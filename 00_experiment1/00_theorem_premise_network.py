@@ -1359,9 +1359,9 @@ def detect_4node_motifs(G, sample_size=None):
             continue
         
         # Check all pairs of predecessors (v, w) of x
-            in_x_list = list(in_x)
-            for idx, v in enumerate(in_x_list):
-                for w in in_x_list[idx+1:]:
+        in_x_list = list(in_x)
+        for idx, v in enumerate(in_x_list):
+            for w in in_x_list[idx+1:]:
                 # Check that v→x and w→x exist (already true since v, w ∈ In(x))
                 # Now check if there exists a common predecessor u of both v and w
                 # such that u→v and u→w exist, and v and w are incomparable (no edge between them)
