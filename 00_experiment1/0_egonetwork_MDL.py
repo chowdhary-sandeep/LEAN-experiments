@@ -26,15 +26,62 @@ try:
     G_original = bundle["G_original"]
     ego_network_data = bundle.get("ego_network_data", {})
     theorems_list = bundle.get("theorems_list", [])
-    print(f"  Loaded {len(theorems_list):,} theorems")
+    
+    # If ego_network_data is missing, generate it from G_original
+    if not ego_network_data or not theorems_list:
+        print("  Ego network data not in cache, generating from graph...")
+        theorems_list = [n for n in G_original.nodes() if G_original.nodes[n].get("node_type") == "theorem"]
+        
+        # Generate ego network data
+        Out = {n: set(G_original.successors(n)) for n in G_original.nodes()}
+        In = {n: set(G_original.predecessors(n)) for n in G_original.nodes()}
+        all_edges_set = set(G_original.edges())
+        
+        ego_network_data = {}
+        for theorem in theorems_list:
+            # Get parents (nodes that point TO this theorem)
+            parents = list(In[theorem])
+            # Get children (nodes that this theorem points TO)
+            # Note: children can be theorems (if this theorem is used as a premise)
+            children = list(Out[theorem])
+            
+            edges = []
+            # Parent -> theorem edges
+            for parent in parents:
+                if (parent, theorem) in all_edges_set:
+                    edges.append({"from": parent, "to": theorem})
+            # Theorem -> child edges
+            for child in children:
+                if (theorem, child) in all_edges_set:
+                    edges.append({"from": theorem, "to": child})
+            # Parent -> child edges (bypass edges)
+            for parent in parents:
+                for child in children:
+                    if (parent, child) in all_edges_set:
+                        edges.append({"from": parent, "to": child})
+            
+            ego_network_data[theorem] = {
+                "parents": parents,
+                "children": children,
+                "edges": edges,
+                "num_parents": len(parents),
+                "num_children": len(children),
+                "num_bypass_edges": sum(1 for p in parents for c in children if (p, c) in all_edges_set)
+            }
+        
+        print(f"  Generated ego network data for {len(theorems_list):,} theorems")
+    else:
+        print(f"  Loaded {len(theorems_list):,} theorems from cache")
 except Exception as e:
     print(f"Error loading cache: {e}")
+    import traceback
+    traceback.print_exc()
     G_original = None
     ego_network_data = {}
     theorems_list = []
 
 
-def format_ego_network_for_vis(theorem, G, ego_data):
+def format_ego_network_for_vis(theorem, G, ego_data, distance=1):
     """Format ego network data for vis-network visualization."""
     if theorem not in ego_data:
         return None
@@ -49,11 +96,19 @@ def format_ego_network_for_vis(theorem, G, ego_data):
     ego_nodes.update(parents)
     ego_nodes.update(children)
     
-    # Create node data
+    # Create node data with topological levels
     nodes = []
     for node in ego_nodes:
         short_name = node.split('.')[-1] if '.' in node else node[:50]
         node_type = G.nodes[node].get("node_type", "unknown")
+        
+        # Determine topological level for staggering
+        if node == theorem:
+            level = 2  # Central node
+        elif node in parents:
+            level = 1  # Parents
+        else:
+            level = 3  # Children
         
         # Brutalist dark theme: black/white only
         if node == theorem:
@@ -79,10 +134,11 @@ def format_ego_network_for_vis(theorem, G, ego_data):
             },
             "shape": shape,
             "font": {
-                "size": 14 if node == theorem else 12,
+                "size": 11 if node == theorem else 10,
                 "color": "#000000" if color == "#FFFFFF" else "#FFFFFF"
             },
-            "borderWidth": 3
+            "borderWidth": 2,
+            "level": level
         })
     
     return {
@@ -113,45 +169,65 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             font-family: 'Courier New', monospace;
             background: #000000;
             color: #FFFFFF;
-            padding: 20px;
-            font-size: 14px;
+            padding: 10px;
+            font-size: 12px;
+            margin: 0;
         }
         .container {
-            max-width: 1600px;
+            max-width: 1200px;
             margin: 0 auto;
-            border: 4px solid #FFFFFF;
-            padding: 20px;
+            border: 2px solid #FFFFFF;
+            padding: 10px;
             background: #000000;
         }
         h1 {
-            font-size: 32px;
+            font-size: 18px;
             font-weight: bold;
             text-transform: uppercase;
-            letter-spacing: 4px;
-            margin-bottom: 20px;
-            border-bottom: 4px solid #FFFFFF;
-            padding-bottom: 10px;
+            letter-spacing: 2px;
+            margin: 0 0 10px 0;
+            border-bottom: 2px solid #FFFFFF;
+            padding-bottom: 5px;
         }
         .controls {
-            margin-bottom: 20px;
+            margin-bottom: 10px;
             display: flex;
             align-items: center;
-            gap: 15px;
+            gap: 10px;
             flex-wrap: wrap;
         }
-        label {
-            font-weight: bold;
-            font-size: 16px;
-            text-transform: uppercase;
-        }
-        select {
-            padding: 10px 15px;
-            font-size: 14px;
+        .toggle-button {
+            padding: 5px 15px;
+            font-size: 12px;
             font-family: 'Courier New', monospace;
             background: #000000;
             color: #FFFFFF;
-            border: 3px solid #FFFFFF;
-            min-width: 400px;
+            border: 2px solid #FFFFFF;
+            cursor: pointer;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+        .toggle-button.active {
+            background: #FFFFFF;
+            color: #000000;
+        }
+        .toggle-button:hover {
+            background: #FFFFFF;
+            color: #000000;
+        }
+        label {
+            font-weight: bold;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+        select {
+            padding: 5px 10px;
+            font-size: 12px;
+            font-family: 'Courier New', monospace;
+            background: #000000;
+            color: #FFFFFF;
+            border: 2px solid #FFFFFF;
+            min-width: 300px;
             cursor: pointer;
         }
         select:focus {
@@ -161,45 +237,55 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .info {
             background: #FFFFFF;
             color: #000000;
-            padding: 15px;
-            margin-bottom: 20px;
-            border: 3px solid #000000;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 2px solid #000000;
             font-weight: bold;
+            font-size: 11px;
         }
         .info strong {
             text-transform: uppercase;
         }
+        .info.note {
+            background: #000000;
+            color: #FFFFFF;
+            border: 2px solid #FFFFFF;
+            font-size: 10px;
+            font-weight: normal;
+            padding: 6px;
+        }
         #network {
             width: 100%;
-            height: 800px;
-            border: 4px solid #FFFFFF;
+            height: 500px;
+            border: 2px solid #FFFFFF;
             background: #000000;
         }
         .legend {
-            margin-top: 20px;
-            padding: 15px;
-            border: 3px solid #FFFFFF;
+            margin-top: 10px;
+            padding: 8px;
+            border: 2px solid #FFFFFF;
             background: #000000;
         }
         .legend-title {
             font-weight: bold;
-            font-size: 16px;
+            font-size: 11px;
             text-transform: uppercase;
-            margin-bottom: 10px;
-            border-bottom: 2px solid #FFFFFF;
-            padding-bottom: 5px;
+            margin-bottom: 5px;
+            border-bottom: 1px solid #FFFFFF;
+            padding-bottom: 3px;
         }
         .legend-item {
             display: inline-block;
-            margin-right: 30px;
-            margin-top: 10px;
+            margin-right: 20px;
+            margin-top: 5px;
+            font-size: 10px;
         }
         .legend-color {
             display: inline-block;
-            width: 30px;
-            height: 30px;
-            border: 3px solid #FFFFFF;
-            margin-right: 8px;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #FFFFFF;
+            margin-right: 5px;
             vertical-align: middle;
         }
         .legend-text {
@@ -217,6 +303,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <select id="theoremSelect" onchange="updateNetwork()">
                 <option value="">-- SELECT --</option>
             </select>
+            <button id="distanceToggle" class="toggle-button active" onclick="toggleDistance()">DISTANCE 2</button>
+        </div>
+        
+        <div class="info note" style="margin-bottom: 10px;">
+            <strong>NOTE:</strong> Most theorems (88%) are leaf nodes with no children. Theorems with children are listed first in the dropdown.
         </div>
         
         <div class="info" id="networkInfo" style="display: none;">
@@ -250,6 +341,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <script type="text/javascript">
         let network = null;
         let allTheorems = [];
+        let currentDistance = 2; // Default to distance 2
         
         // Load theorem list on page load
         fetch('/api/theorems')
@@ -266,6 +358,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 });
             });
         
+        function toggleDistance() {
+            currentDistance = currentDistance === 1 ? 2 : 1;
+            const button = document.getElementById('distanceToggle');
+            button.textContent = `DISTANCE ${currentDistance}`;
+            button.classList.toggle('active', currentDistance === 2);
+            updateNetwork();
+        }
+        
+        // Initialize button state on page load
+        window.addEventListener('DOMContentLoaded', function() {
+            const button = document.getElementById('distanceToggle');
+            button.textContent = `DISTANCE ${currentDistance}`;
+            button.classList.toggle('active', currentDistance === 2);
+        });
+        
         function updateNetwork() {
             const select = document.getElementById('theoremSelect');
             const theorem = select.value;
@@ -281,8 +388,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 return;
             }
             
-            // Fetch ego network data
-            fetch(`/api/ego/${encodeURIComponent(theorem)}`)
+            // Fetch ego network data with current distance
+            fetch(`/api/ego/${encodeURIComponent(theorem)}/${currentDistance}`)
                 .then(response => response.json())
                 .then(data => {
                     if (!data.success) {
@@ -290,7 +397,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         return;
                     }
                     
-                    const nodes = new vis.DataSet(data.network.nodes);
+                    // Process nodes: ensure level property is set for vis-network hierarchical layout
+                    const processedNodes = data.network.nodes.map(node => {
+                        const processedNode = {...node};
+                        // vis-network hierarchical layout uses 'level' property
+                        if (processedNode.level === undefined) {
+                            processedNode.level = 2; // Default to central level
+                        }
+                        return processedNode;
+                    });
+                    
+                    const nodes = new vis.DataSet(processedNodes);
                     const edges = new vis.DataSet(data.network.edges);
                     
                     const container = document.getElementById('network');
@@ -299,20 +416,28 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         network.destroy();
                     }
                     
+                    const maxLevel = Math.max(...processedNodes.map(n => n.level || 2));
+                    const levelSeparation = maxLevel > 3 ? 70 : 90;
+                    
                     const options = {
                         nodes: {
-                            borderWidth: 3,
+                            borderWidth: 2,
                             shadow: false,
                             font: {
-                                size: 12,
+                                size: 10,
                                 face: 'Courier New'
+                            },
+                            size: 18,
+                            fixed: {
+                                x: false,
+                                y: false
                             }
                         },
                         edges: {
                             arrows: {
                                 to: {
                                     enabled: true,
-                                    scaleFactor: 1.0,
+                                    scaleFactor: 0.7,
                                     type: 'arrow'
                                 }
                             },
@@ -324,16 +449,20 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                                 color: '#FFFFFF',
                                 highlight: '#FFFFFF'
                             },
-                            width: 2
+                            width: 1.5
                         },
                         layout: {
                             hierarchical: {
                                 enabled: true,
                                 direction: 'UD',
                                 sortMethod: 'directed',
-                                levelSeparation: 200,
-                                nodeSpacing: 250,
-                                treeSpacing: 300
+                                levelSeparation: levelSeparation,
+                                nodeSpacing: 60,
+                                treeSpacing: 80,
+                                blockShifting: true,
+                                edgeMinimization: true,
+                                parentCentralization: true,
+                                shakeTowards: 'leaves'
                             }
                         },
                         physics: {
@@ -350,12 +479,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     network = new vis.Network(container, {nodes: nodes, edges: edges}, options);
                     
                     // Update info
+                    const distanceText = currentDistance === 2 ? ' (DISTANCE 2)' : '';
                     infoText.innerHTML = `
                         PARENTS: <strong>${data.network.num_parents}</strong> | 
                         CHILDREN: <strong>${data.network.num_children}</strong> | 
                         BYPASS EDGES: <strong>${data.network.num_bypass_edges}</strong> | 
                         TOTAL NODES: <strong>${data.network.nodes.length}</strong> | 
-                        TOTAL EDGES: <strong>${data.network.edges.length}</strong>
+                        TOTAL EDGES: <strong>${data.network.edges.length}</strong>${distanceText}
                     `;
                     infoDiv.style.display = 'block';
                     
@@ -383,21 +513,182 @@ def index():
 @app.route('/api/theorems')
 def get_theorems():
     """API endpoint to get list of all theorems."""
-    theorems_sorted = sorted(theorems_list, key=lambda x: x.split('.')[-1] if '.' in x else x)
+    # Sort theorems: those with children first, then alphabetically
+    if G_original and ego_network_data:
+        Out = {n: set(G_original.successors(n)) for n in G_original.nodes()}
+        theorems_with_children = [t for t in theorems_list if len(Out.get(t, [])) > 0]
+        theorems_without_children = [t for t in theorems_list if len(Out.get(t, [])) == 0]
+        
+        # Sort each group alphabetically
+        theorems_with_children.sort(key=lambda x: x.split('.')[-1] if '.' in x else x)
+        theorems_without_children.sort(key=lambda x: x.split('.')[-1] if '.' in x else x)
+        
+        # Combine: theorems with children first
+        theorems_sorted = theorems_with_children + theorems_without_children
+    else:
+        theorems_sorted = sorted(theorems_list, key=lambda x: x.split('.')[-1] if '.' in x else x)
+    
     return jsonify({"theorems": theorems_sorted})
 
 
 @app.route('/api/ego/<theorem>')
 def get_ego_network(theorem):
     """API endpoint to get ego network data for a specific theorem."""
-    if not G_original or theorem not in ego_network_data:
+    return get_ego_network_with_distance(theorem, distance=1)
+
+@app.route('/api/ego/<theorem>/<int:distance>')
+def get_ego_network_with_distance(theorem, distance=1):
+    """API endpoint to get ego network data for a specific theorem with specified distance."""
+    if not G_original:
+        return jsonify({"success": False, "error": "Graph not loaded"})
+    
+    if theorem not in G_original:
         return jsonify({"success": False, "error": "Theorem not found"})
     
-    network_data = format_ego_network_for_vis(theorem, G_original, ego_network_data)
+    # Generate ego network for requested distance
+    if distance == 1:
+        # Use cached data if available
+        if theorem in ego_network_data:
+            network_data = format_ego_network_for_vis(theorem, G_original, ego_network_data, distance=1)
+        else:
+            network_data = generate_ego_network_for_theorem(theorem, G_original, distance=1)
+    else:
+        # Generate distance-2 network on the fly
+        network_data = generate_ego_network_for_theorem(theorem, G_original, distance=distance)
+    
     if network_data is None:
         return jsonify({"success": False, "error": "Failed to format network data"})
     
     return jsonify({"success": True, "network": network_data})
+
+
+def generate_ego_network_for_theorem(theorem, G, distance=1):
+    """Generate ego network data for a theorem with specified distance."""
+    Out = {n: set(G.successors(n)) for n in G.nodes()}
+    In = {n: set(G.predecessors(n)) for n in G.nodes()}
+    all_edges_set = set(G.edges())
+    
+    if distance == 1:
+        # Standard 1-hop ego network
+        parents = set(In[theorem])
+        children = set(Out[theorem])
+        ego_nodes = set([theorem])
+        ego_nodes.update(parents)
+        ego_nodes.update(children)
+        
+        # Collect edges: parent->theorem, theorem->child, parent->child
+        edges = []
+        for p in parents:
+            if (p, theorem) in all_edges_set:
+                edges.append({"from": p, "to": theorem})
+        for c in children:
+            if (theorem, c) in all_edges_set:
+                edges.append({"from": theorem, "to": c})
+        for p in parents:
+            for c in children:
+                if (p, c) in all_edges_set:
+                    edges.append({"from": p, "to": c})
+        
+        num_parents = len(parents)
+        num_children = len(children)
+        num_bypass = sum(1 for p in parents for c in children if (p, c) in all_edges_set)
+    else:
+        # Distance-2: include parents of parents and children of children
+        parents = set(In[theorem])
+        children = set(Out[theorem])
+        
+        # Parents of parents (distance 2 upstream)
+        parents2 = set()
+        for p in parents:
+            parents2.update(In[p])
+        parents2.discard(theorem)  # Remove self
+        
+        # Children of children (distance 2 downstream)
+        children2 = set()
+        for c in children:
+            children2.update(Out[c])
+        children2.discard(theorem)  # Remove self
+        
+        ego_nodes = set([theorem])
+        ego_nodes.update(parents)
+        ego_nodes.update(children)
+        ego_nodes.update(parents2)
+        ego_nodes.update(children2)
+        
+        # Collect ALL edges between any ego nodes (cross-connections)
+        edges = []
+        for u in ego_nodes:
+            for v in ego_nodes:
+                if (u, v) in all_edges_set and u != v:
+                    edges.append({"from": u, "to": v})
+        
+        num_parents = len(parents)
+        num_children = len(children)
+        num_bypass = 0  # Not meaningful for distance 2
+    
+    # Create node data with topological levels for staggering
+    nodes = []
+    for node in ego_nodes:
+        short_name = node.split('.')[-1] if '.' in node else node[:50]
+        node_type = G.nodes[node].get("node_type", "unknown")
+        
+        # Determine topological level
+        if node == theorem:
+            level = 2  # Central node
+        elif distance == 1:
+            if node in parents:
+                level = 1  # Parents
+            else:
+                level = 3  # Children
+        else:
+            # Distance 2: 5 levels
+            if node in parents2:
+                level = 0  # Grandparents
+            elif node in parents:
+                level = 1  # Parents
+            elif node in children:
+                level = 3  # Children
+            else:  # children2
+                level = 4  # Grandchildren
+        
+        # Brutalist dark theme
+        if node == theorem:
+            color = "#FFFFFF"
+            border_color = "#000000"
+            shape = "box"
+        elif node_type == "premise":
+            color = "#000000"
+            border_color = "#FFFFFF"
+            shape = "ellipse"
+        else:
+            color = "#FFFFFF"
+            border_color = "#000000"
+            shape = "ellipse"
+        
+        nodes.append({
+            "id": node,
+            "label": short_name,
+            "title": node,
+            "color": {
+                "background": color,
+                "border": border_color
+            },
+            "shape": shape,
+            "font": {
+                "size": 11 if node == theorem else 10,
+                "color": "#000000" if color == "#FFFFFF" else "#FFFFFF"
+            },
+            "borderWidth": 2,
+            "level": level
+        })
+    
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "num_parents": num_parents,
+        "num_children": num_children,
+        "num_bypass_edges": num_bypass
+    }
 
 
 @app.route('/lib/<path:filename>')

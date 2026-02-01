@@ -77,6 +77,7 @@ def fix_theorem_record(entry):
     metrics["avg_premise_confidence"] = (
         sum(v["confidence_sum"] / max(1, v["count"]) for v in all_premises.values()) / max(1, len(all_premises))
         if all_premises else 0
+    )
     entry["metrics"] = metrics
 
     # Recompute quality.all_premises_resolved

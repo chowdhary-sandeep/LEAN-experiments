@@ -210,8 +210,13 @@ else:
                     continue
                 
                 # Add premise node (source)
-                G.add_node(premise_full_name, node_type="premise")
-                premises_seen.add(premise_full_name)
+                # If node already exists as a theorem, keep it as theorem (theorem can be used as premise)
+                if premise_full_name not in G:
+                    G.add_node(premise_full_name, node_type="premise")
+                    premises_seen.add(premise_full_name)
+                elif G.nodes[premise_full_name].get("node_type") == "theorem":
+                    # This premise is actually a theorem - don't change its type
+                    premises_seen.add(premise_full_name)  # Still count as premise usage
                 
                 # Add edge: premise (source) -> theorem (target)
                 # This represents "theorem uses premise"
