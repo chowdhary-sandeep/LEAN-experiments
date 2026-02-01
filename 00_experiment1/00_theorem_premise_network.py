@@ -130,9 +130,9 @@ with open(DATA_FILE, "r", encoding="utf-8") as f:
         all_premises = entry.get("all_premises", {})
         
         # Iterate over premise full_names (keys of all_premises dict)
-        # These are the source nodes
+        # Skip tactics and hypothesis names (simpa, hx, symm, etc.) - not real lemmas
         for premise_full_name in all_premises.keys():
-            if not premise_full_name:
+            if not premise_full_name or _is_tactic_or_hyp(premise_full_name):
                 continue
             
             # Add premise node (source)

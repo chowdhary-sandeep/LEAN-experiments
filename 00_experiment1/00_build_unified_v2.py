@@ -378,6 +378,31 @@ def extract_surface_premises(tactic: str) -> list:
     return list(dict.fromkeys(premises))  # Dedupe preserving order
 
 
+# Common tactics and hypothesis names to exclude from premises (not real lemmas).
+# Applied when building resolved_premises so they never enter the JSONL.
+TACTIC_OR_HYP_FILTER = frozenset({
+    # Common tactics
+    "simpa", "symm", "rwa", "mpr", "mp", "rfl", "refl", "simp", "rw", "apply", "exact",
+    "intro", "intros", "refine", "cases", "rcases", "obtain", "induction", "constructor",
+    "ring", "linarith", "omega", "trivial", "decide", "aesop", "ext", "congr", "have",
+    "show", "from", "by", "left", "right", "split", "contrapose", "push_neg", "norm_num",
+    "positivity", "polyrith", "nlinarith", "field_simp", "assumption", "tidy", "gcongr",
+    "rel_simp", "erw", "era", "convert", "ac_rfl", "native_decide",
+    # Hypothesis / local names (h + letter(s) or digits)
+    "hx", "hf", "hs", "ha", "hb", "hc", "hd", "he", "hh", "hi", "hj", "hk", "hl", "hm",
+    "hn", "ho", "hp", "hq", "hr", "ht", "hu", "hv", "hw", "hy", "hz", "h1", "h2", "h3",
+    "ih", "IH", "this", "that",
+})
+
+
+def _is_tactic_or_hyp(name):
+    """True if premise name (or its suffix) is a known tactic or hypothesis pattern."""
+    if not name:
+        return True
+    suffix = (name.split(".")[-1] or "").strip()
+    return suffix.lower() in TACTIC_OR_HYP_FILTER
+
+
 # =============================================================================
 # MAIN BUILD FUNCTION
 # =============================================================================
@@ -543,7 +568,7 @@ def build_unified_v2(traced_repo, output_file: str = None,
                         for p in leandojo_premises:
                             if isinstance(p, dict):
                                 full_name = p.get('full_name') or p.get('fullName', '')
-                                if full_name:
+                                if full_name and not _is_tactic_or_hyp(full_name):
                                     prem_info = {
                                         "surface_name": full_name.rsplit('.', 1)[-1],
                                         "full_name": full_name,
@@ -560,18 +585,22 @@ def build_unified_v2(traced_repo, output_file: str = None,
                         surface_names = extract_surface_premises(tactic_str)
                         for sn in surface_names:
                             resolved = resolver.resolve(sn, context, open_namespaces)
-                            resolved_premises.append(resolved)
-                            stats["resolution_methods"][resolved["resolution_method"]] += 1
-                            if resolved["confidence"] >= 0.6:
-                                stats["high_confidence"] += 1
-                            else:
-                                stats["low_confidence"] += 1
+                            fn = resolved.get("full_name") or resolved.get("surface_name", "")
+                            if fn and not _is_tactic_or_hyp(fn):
+                                resolved_premises.append(resolved)
+                                stats["resolution_methods"][resolved["resolution_method"]] += 1
+                                if resolved["confidence"] >= 0.6:
+                                    stats["high_confidence"] += 1
+                                else:
+                                    stats["low_confidence"] += 1
                     
                     stats["total_premises"] += len(resolved_premises)
                     
-                    # Update all_premises aggregation
+                    # Update all_premises aggregation (skip tactics/hypotheses)
                     for prem in resolved_premises:
                         fn = prem["full_name"]
+                        if _is_tactic_or_hyp(fn):
+                            continue
                         all_premises[fn]["count"] += 1
                         all_premises[fn]["tactics"].append(idx)
                         all_premises[fn]["confidence_sum"] += prem.get("confidence", 0)
