@@ -27,10 +27,33 @@ except ImportError:
 if sys.platform == 'win32' and hasattr(sys.stdout, 'buffer'):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-# Configuration
-DATA_FILE = "traced_theorems_unified_v2.jsonl"
-OUTPUT_PDF = "theorem_premise_network_analysis.pdf"
-OUTPUT_PNG = "theorem_premise_network_analysis.png"
+# Configuration: load from jsons/ next to this script, save PDF/PNG in script dir
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_DATA_DIR = _SCRIPT_DIR / "jsons"
+DATA_FILE = str(_DATA_DIR / "traced_theorems_unified_v2.jsonl")
+OUTPUT_PDF = str(_SCRIPT_DIR / "theorem_premise_network_analysis.pdf")
+OUTPUT_PNG = str(_SCRIPT_DIR / "theorem_premise_network_analysis.png")
+
+# Tactic names and hypothesis patterns to exclude from "premises" (not real lemmas)
+TACTIC_OR_HYP_FILTER = frozenset({
+    # Common tactics
+    "simpa", "symm", "rwa", "mpr", "mp", "rfl", "refl", "simp", "rw", "apply", "exact",
+    "intro", "intros", "refine", "cases", "rcases", "obtain", "induction", "constructor",
+    "ring", "linarith", "omega", "trivial", "decide", "aesop", "ext", "congr", "have",
+    "show", "from", "by", "left", "right", "split", "contrapose", "push_neg", "norm_num",
+    "positivity", "polyrith", "nlinarith", "field_simp", "assumption", "tidy", "omega",
+    "gcongr", "rel_simp", "erw", "rwa", "era", "convert", "ac_rfl", "native_decide",
+    # Hypothesis / local names (h + letter(s))
+    "hx", "hf", "hs", "ha", "hb", "hc", "hd", "he", "hh", "hi", "hj", "hk", "hl", "hm",
+    "hn", "ho", "hp", "hq", "hr", "ht", "hu", "hv", "hw", "hy", "hz", "h1", "h2", "h3",
+    "ih", "IH", "this", "that",
+})
+def _is_tactic_or_hyp(name):
+    """True if premise name (or its suffix) is a known tactic or hypothesis pattern."""
+    if not name:
+        return True
+    suffix = name.split(".")[-1].strip()
+    return suffix.lower() in TACTIC_OR_HYP_FILTER
 
 print("=" * 80)
 print("Loading theorem-premise data...")
@@ -54,6 +77,7 @@ print("  (Only processing theorems with proof_type='tactic')")
 G = nx.DiGraph()
 theorems_processed = 0
 theorems_skipped = 0
+n_term = 0
 premises_seen = set()
 theorems_seen = set()
 
@@ -88,6 +112,8 @@ with open(DATA_FILE, "r", encoding="utf-8") as f:
         proof_type = entry.get("proof_type", "")
         if proof_type != "tactic":
             theorems_skipped += 1
+            if proof_type == "term":
+                n_term += 1
             continue
 
         # Get theorem full_name (target node - this is the first key in the row)
@@ -126,8 +152,9 @@ with open(DATA_FILE, "r", encoding="utf-8") as f:
 
 graph_build_time = time.time() - start_time
 print(f"\nGraph built in {graph_build_time:.2f}s:")
-print(f"  Theorems processed: {theorems_processed:,}")
-print(f"  Theorems skipped (non-tactic): {theorems_skipped:,}")
+total_theorems = theorems_processed + theorems_skipped
+print(f"  Theorems processed (tactic): {theorems_processed:,}")
+print(f"  Theorems skipped (non-tactic): {theorems_skipped:,} (term: {n_term:,})")
 print(f"  Nodes: {G.number_of_nodes():,}")
 print(f"    - Premises: {len(premises_seen):,}")
 print(f"    - Theorems: {len(theorems_seen):,}")
@@ -181,7 +208,7 @@ for name, count in top_theorems_by_in:
 # Examples of unresolved lemmas (10 examples with confidence scores)
 # ============================================================================
 print("\n" + "=" * 80)
-print("Examples of unresolved lemmas (10 examples with confidence scores)")
+print("Examples of unresolved premises only (tactics/hypotheses excluded, 10 examples with confidence)")
 print("=" * 80)
 
 unresolved_examples = []  # list of (full_name, confidence, resolution_method, example_theorem)
@@ -203,7 +230,7 @@ with open(DATA_FILE, "r", encoding="utf-8") as f:
             for p in tac.get("premises", []):
                 conf = p.get("confidence", 1.0)
                 full_name = p.get("full_name", "") or p.get("surface_name", "")
-                if not full_name:
+                if not full_name or _is_tactic_or_hyp(full_name):
                     continue
                 # Treat as unresolved if confidence is 0 or very low
                 if conf == 0.0 or (conf < 0.5 and full_name not in seen_unresolved):
@@ -236,7 +263,9 @@ if len(unresolved_examples) < 10:
                 for p in tac.get("premises", []):
                     conf = p.get("confidence", 1.0)
                     full_name = p.get("full_name", "") or p.get("surface_name", "")
-                    if full_name and full_name not in seen and conf < 1.0:
+                    if not full_name or _is_tactic_or_hyp(full_name):
+                        continue
+                    if full_name not in seen and conf < 1.0:
                         seen.add(full_name)
                         method = p.get("resolution_method", "unknown")
                         unresolved_examples.append((full_name, conf, method, theorem_name))
@@ -255,6 +284,91 @@ for i, (full_name, conf, method, thm) in enumerate(unresolved_examples[:10], 1):
     print(f"     confidence: {conf:.4f}  resolution: {method}  example theorem: {short_thm}")
 if not unresolved_examples:
     print("  (No unresolved lemma examples found in data.)")
+
+# ============================================================================
+# 10 examples of tactic proofs with unresolved premises (full proof text)
+# ============================================================================
+print("\n" + "=" * 80)
+print("10 examples of tactic proofs with unresolved premises (full proof)")
+print("=" * 80)
+
+unresolved_tactic_examples = []  # list of (full_name, proof_text)
+with open(DATA_FILE, "r", encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("proof_type") != "tactic":
+            continue
+        theorem_name = entry.get("full_name", "")
+        proof_text = entry.get("proof_text", "") or ""
+        has_unresolved = False
+        for tac in entry.get("tactics", []):
+            for p in tac.get("premises", []):
+                if p.get("confidence", 1.0) == 0.0:
+                    has_unresolved = True
+                    break
+            if has_unresolved:
+                break
+        if has_unresolved and theorem_name:
+            unresolved_tactic_examples.append((theorem_name, proof_text))
+            if len(unresolved_tactic_examples) >= 10:
+                break
+
+for i, (full_name, proof_text) in enumerate(unresolved_tactic_examples[:10], 1):
+    short_name = (full_name.split(".")[-1] if "." in full_name else full_name)[:60]
+    print(f"\n  {i}. theorem: {short_name}")
+    print(f"     full_name: {full_name[:70]}{'...' if len(full_name) > 70 else ''}")
+    print("     proof:")
+    for ln in (proof_text or "(no proof text)").split("\n")[:50]:
+        print(f"       {ln}")
+    if (proof_text or "").count("\n") >= 50:
+        print("       ...")
+if not unresolved_tactic_examples:
+    print("  (No tactic proofs with unresolved premises found.)")
+
+# ============================================================================
+# 10 examples of term proofs (full proof text)
+# ============================================================================
+print("\n" + "=" * 80)
+print("10 examples of term proofs (full proof)")
+print("=" * 80)
+
+term_proof_examples = []  # list of (full_name, proof_text)
+with open(DATA_FILE, "r", encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("proof_type") != "term":
+            continue
+        theorem_name = entry.get("full_name", "")
+        proof_text = entry.get("proof_text", "") or ""
+        if theorem_name:
+            term_proof_examples.append((theorem_name, proof_text))
+            if len(term_proof_examples) >= 10:
+                break
+
+for i, (full_name, proof_text) in enumerate(term_proof_examples[:10], 1):
+    short_name = (full_name.split(".")[-1] if "." in full_name else full_name)[:60]
+    print(f"\n  {i}. theorem: {short_name}")
+    print(f"     full_name: {full_name[:70]}{'...' if len(full_name) > 70 else ''}")
+    print("     proof:")
+    text = proof_text or "(term proof; no proof text in data)"
+    for ln in text.split("\n")[:50]:
+        print(f"       {ln}")
+    if text.count("\n") >= 50:
+        print("       ...")
+if not term_proof_examples:
+    print("  (No term proofs found.)")
 
 # Save original graph for analysis (before node removal)
 G_original = G.copy()
@@ -750,6 +864,11 @@ def extract_ego_networks(G, extreme_nodes, measures, max_nodes=50, max_ego_netwo
 print("\nComputing measures...")
 measures_start = time.time()
 measures = compute_dag_measures(G_original, in_degrees_original, out_degrees_original)
+measures['proof_types'] = {
+    'tactic': theorems_processed,
+    'term': n_term,
+    'total': total_theorems
+}
 measures_time = time.time() - measures_start
 print(f"Measures computed in {measures_time:.2f}s")
 
@@ -823,6 +942,10 @@ def create_multipanel_figure(measures, ego_networks, output_pdf, output_png):
     ax1 = fig.add_subplot(gs[0, 0])
     ax1.axis('off')
     basic = measures['basic']
+    pt = measures.get('proof_types', {})
+    tot = pt.get('total') or 1
+    tactic_pct = 100 * (pt.get('tactic') or 0) / tot
+    term_pct = 100 * (pt.get('term') or 0) / tot
     stats_text = f"""Graph Statistics
     
 Nodes: {basic['nodes']:,}
@@ -832,7 +955,9 @@ Is DAG: {basic['is_dag']}
 Components: {basic['num_components']}
 Sources: {basic['num_sources']}
 Sinks: {basic['num_sinks']}
-Unresolved Premises: {unique_unresolved_pct:.2f}%"""
+Unresolved Premises: {unique_unresolved_pct:.2f}%
+Tactic proofs: {tactic_pct:.1f}%
+Term proofs: {term_pct:.1f}%"""
     ax1.text(0.1, 0.5, stats_text, fontsize=10, family='monospace',
              verticalalignment='center', transform=ax1.transAxes)
     ax1.set_title('Basic Statistics', fontsize=12, fontweight='normal', pad=10)
@@ -896,7 +1021,12 @@ Unresolved Premises: {unique_unresolved_pct:.2f}%"""
         ax2.legend(fontsize=8, loc='best')
         ax2.grid(True, alpha=0.3)
     else:
-        ax2.text(0.5, 0.5, 'No resolution data', ha='center', va='center', transform=ax2.transAxes)
+        ax2.axis('off')
+        pt = measures.get('proof_types', {})
+        fallback = f"""No premise resolution data
+(tactic proofs: {pt.get('tactic', 0):,})"""
+        ax2.text(0.5, 0.5, fallback, fontsize=10, family='monospace',
+                 ha='center', va='center', transform=ax2.transAxes)
         ax2.set_title('Premise Resolution Rates', fontsize=12, fontweight='normal', pad=10)
     ax2.tick_params(labelsize=8)
     
@@ -913,8 +1043,38 @@ Unresolved Premises: {unique_unresolved_pct:.2f}%"""
         ax3.loglog(degrees_plot, frequencies_plot, 'o', color='black', markersize=3, alpha=0.7)
         ax3.set_xlabel('In-Degree+1 (log)', fontsize=9)
         ax3.set_ylabel('Frequency (log)', fontsize=9)
+    else:
+        ax3.axis('off')
+        ax3.text(0.5, 0.5, 'No in-degree data', ha='center', va='center', transform=ax3.transAxes)
     ax3.set_title('In-Degree Distribution', fontsize=12, fontweight='normal', pad=10)
     ax3.tick_params(labelsize=8)
+
+    # Panel 3b: Out-degree / Total degree per node (distribution)
+    ax3b = fig.add_subplot(gs[2, 0:3])  # full width of row 2
+    in_deg = in_degrees_original
+    out_deg = out_degrees_original
+    ratios = []
+    for n in G_original.nodes():
+        i = in_deg.get(n, 0)
+        o = out_deg.get(n, 0)
+        total = i + o
+        if total > 0:
+            ratios.append(o / total)
+    if ratios:
+        bins = np.linspace(0, 1, 51)
+        hist, _ = np.histogram(ratios, bins=bins)
+        bin_centers = (bins[:-1] + bins[1:]) / 2
+        ax3b.fill_between(bin_centers, hist, alpha=0.6, color='#1565c0')
+        ax3b.plot(bin_centers, hist, 'o', color='#0d47a1', markersize=2, alpha=0.8)
+        ax3b.set_xlabel('Out-degree / (In + Out) per node', fontsize=9)
+        ax3b.set_ylabel('Number of nodes', fontsize=9)
+        ax3b.set_title('Distribution of out_degree / total_degree per node', fontsize=12, fontweight='normal', pad=10)
+        ax3b.grid(True, alpha=0.3)
+    else:
+        ax3b.axis('off')
+        ax3b.text(0.5, 0.5, 'No degree data', ha='center', va='center', transform=ax3b.transAxes)
+        ax3b.set_title('Out / Total degree per node', fontsize=12, fontweight='normal', pad=10)
+    ax3b.tick_params(labelsize=8)
 
     # Panel 4: Out-Degree Distribution (log-linear) - pre-compute for efficiency
     ax4 = fig.add_subplot(gs[1, 0])
@@ -929,10 +1089,13 @@ Unresolved Premises: {unique_unresolved_pct:.2f}%"""
         ax4.semilogx(degrees_plot, frequencies_plot, 'o', color='black', markersize=3, alpha=0.7)
         ax4.set_xlabel('Out-Degree+1 (log)', fontsize=9)
         ax4.set_ylabel('Frequency', fontsize=9)
+    else:
+        ax4.axis('off')
+        ax4.text(0.5, 0.5, 'No out-degree data', ha='center', va='center', transform=ax4.transAxes)
     ax4.set_title('Out-Degree Distribution', fontsize=12, fontweight='normal', pad=10)
     ax4.tick_params(labelsize=8)
     
-    # Panel 5: Level Distribution
+    # Panel 5: Level Distribution (or Proof Types when no level data)
     ax5 = fig.add_subplot(gs[1, 1])
     if 'levels' in measures and measures['levels']['level_distribution']:
         level_dist = measures['levels']['level_distribution']
@@ -943,8 +1106,23 @@ Unresolved Premises: {unique_unresolved_pct:.2f}%"""
         ax5.set_ylabel('Number of Nodes', fontsize=9)
         ax5.set_title('Level Distribution', fontsize=12, fontweight='normal', pad=10)
     else:
-        ax5.text(0.5, 0.5, 'No level data', ha='center', va='center', transform=ax5.transAxes)
-        ax5.set_title('Level Distribution', fontsize=12, fontweight='normal', pad=10)
+        # Use this subplot for Proof Types so no slot is empty
+        pt = measures.get('proof_types', {})
+        n_tactic = pt.get('tactic') or 0
+        n_term = pt.get('term') or 0
+        if n_tactic or n_term:
+            labels = ['Tactic', 'Term']
+            vals = [n_tactic, n_term]
+            colors = ['#2e7d32', '#1565c0']
+            bars = ax5.bar(labels, vals, color=colors, alpha=0.8, edgecolor='black', linewidth=0.5)
+            ax5.set_ylabel('Number of Theorems', fontsize=9)
+            ax5.set_title('Proof Types (level data N/A)', fontsize=12, fontweight='normal', pad=10)
+            for b, v in zip(bars, vals):
+                ax5.text(b.get_x() + b.get_width() / 2, b.get_height() + max(vals) * 0.01,
+                        f'{v:,}', ha='center', va='bottom', fontsize=9)
+        else:
+            ax5.text(0.5, 0.5, 'No level data', ha='center', va='center', transform=ax5.transAxes)
+            ax5.set_title('Level Distribution', fontsize=12, fontweight='normal', pad=10)
     ax5.tick_params(labelsize=8)
     
     # Panel 6: Component Size Distribution (log-log)
@@ -972,12 +1150,19 @@ Unresolved Premises: {unique_unresolved_pct:.2f}%"""
         ax6.xaxis.set_major_locator(LogLocator(base=10, numticks=15))
         ax6.xaxis.set_minor_locator(LogLocator(base=10, subs=np.arange(2, 10), numticks=15))
     else:
-        ax6.text(0.5, 0.5, 'No component data', ha='center', va='center', transform=ax6.transAxes)
-        ax6.set_title('Component Size Distribution', fontsize=12, fontweight='normal', pad=10)
+        # Use subplot instead of leaving empty: show graph summary
+        ax6.axis('off')
+        summary = f"""Component summary
+Nodes: {basic['nodes']:,}
+Edges: {basic['edges']:,}
+Components: {basic['num_components']}"""
+        ax6.text(0.5, 0.5, summary, fontsize=10, family='monospace',
+                 ha='center', va='center', transform=ax6.transAxes)
+        ax6.set_title('Component Size (no distribution)', fontsize=12, fontweight='normal', pad=10)
     ax6.tick_params(labelsize=8)
     
     # ========================================================================
-    # Bottom Section: Ego Network Grid
+    # Bottom Section: Ego Network Grid (starts at row 3; rows 0-2 are stats)
     # ========================================================================
     
     print(f"  Creating ego network visualizations ({len(ego_networks)} networks)...")
@@ -985,10 +1170,11 @@ Unresolved Premises: {unique_unresolved_pct:.2f}%"""
     # Determine grid size for ego networks
     n_ego = len(ego_networks)
     n_cols = 6
+    stats_rows = 3  # rows 0, 1, 2 used by statistics panels
     n_rows = (n_ego + n_cols - 1) // n_cols
     
     for idx, ego_data in enumerate(ego_networks):
-        row = 2 + (idx // n_cols)
+        row = stats_rows + (idx // n_cols)
         col = idx % n_cols
         
         if row >= 8:  # Don't exceed figure bounds

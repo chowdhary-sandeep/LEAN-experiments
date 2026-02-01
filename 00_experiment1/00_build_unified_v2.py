@@ -403,10 +403,12 @@ def build_unified_v2(traced_repo, output_file: str = None,
 
     if output_dir is not None:
         os.makedirs(output_dir, exist_ok=True)
-        out_file = os.path.join(output_dir, OUTPUT_FILE) if output_file is None else output_file
-        stats_file = os.path.join(output_dir, STATS_FILE)
-        # Look for corpus in output_dir so all 4 files (corpus, unified, stats, premise_index) can live there
-        corpus_file_used = os.path.join(output_dir, CORPUS_FILE)
+        # Save all 4 files into output_dir/jsons/ (e.g. 00_experiment1/jsons/)
+        jsons_dir = os.path.join(output_dir, "jsons")
+        os.makedirs(jsons_dir, exist_ok=True)
+        out_file = os.path.join(jsons_dir, OUTPUT_FILE) if output_file is None else output_file
+        stats_file = os.path.join(jsons_dir, STATS_FILE)
+        corpus_file_used = os.path.join(jsons_dir, CORPUS_FILE)
     else:
         out_file = output_file if output_file is not None else OUTPUT_FILE
         stats_file = STATS_FILE
@@ -417,9 +419,9 @@ def build_unified_v2(traced_repo, output_file: str = None,
     print("="*70)
     if output_dir:
         print(f"Output directory: {output_dir}")
-        # Build corpus.jsonl in output_dir first (file 1 of 4)
+        # Build corpus.jsonl in output_dir/jsons/ first (file 1 of 4)
         print("\nExporting corpus (corpus.jsonl)...")
-        _export_corpus(traced_repo, output_dir)
+        _export_corpus(traced_repo, jsons_dir)
 
     # Initialize resolver (uses corpus in output_dir when output_dir is set)
     resolver = PremiseResolver(corpus_file_used)
@@ -662,9 +664,9 @@ def build_unified_v2(traced_repo, output_file: str = None,
         json.dump(stats, f, indent=2, ensure_ascii=False)
     print(f"\nStats saved to: {stats_file}")
 
-    # Save premise index in output_dir when set (file 4 of 4)
+    # Save premise index in output_dir/jsons/ when set (file 4 of 4)
     if output_dir is not None:
-        premise_index_path = os.path.join(output_dir, PREMISE_INDEX_FILE)
+        premise_index_path = os.path.join(jsons_dir, PREMISE_INDEX_FILE)
         with open(premise_index_path, "w", encoding="utf-8") as f:
             json.dump({
                 "premises": sorted(resolver.corpus_index["_exact_"]),
