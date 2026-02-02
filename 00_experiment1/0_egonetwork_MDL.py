@@ -16,10 +16,37 @@ CACHE_DIR = _SCRIPT_DIR / "cache"
 CACHE_BUNDLE = CACHE_DIR / "bundle.pkl"
 LIB_DIR = _SCRIPT_DIR.parent / "lib" / "vis-9.1.2"
 CORPUS_CODE_INDEX = _SCRIPT_DIR / "jsons" / "corpus_code_index.json"
+TRACED_THEOREMS_FILE = _SCRIPT_DIR / "jsons" / "traced_theorems_unified_v2.jsonl"
 
 app = Flask(__name__)
 
-# Load corpus code index
+# Load traced theorems index (for proof_text)
+print("Loading traced theorems index...")
+traced_theorems_index = {}
+if TRACED_THEOREMS_FILE.exists():
+    try:
+        with open(TRACED_THEOREMS_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                    full_name = entry.get("full_name", "")
+                    if full_name:
+                        traced_theorems_index[full_name] = {
+                            "proof_text": entry.get("proof_text", ""),
+                            "statement": entry.get("statement", ""),
+                            "proof_type": entry.get("proof_type", "unknown")
+                        }
+                except json.JSONDecodeError:
+                    continue
+        print(f"  Loaded {len(traced_theorems_index):,} theorems from traced_theorems_unified_v2.jsonl")
+    except Exception as e:
+        print(f"  Warning: Failed to load traced theorems index: {e}")
+else:
+    print(f"  Warning: Traced theorems file not found at {TRACED_THEOREMS_FILE}")
+
+# Load corpus code index (fallback for premises/theorems not in traced file)
 print("Loading corpus code index...")
 corpus_code_index = {}
 if CORPUS_CODE_INDEX.exists():
@@ -298,6 +325,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             align-items: center;
             gap: 10px;
             flex-wrap: wrap;
+            position: relative;
         }
         .toggle-button {
             padding: 5px 15px;
@@ -448,16 +476,43 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             flex: 1;
             overflow: auto;
         }
-        .proof-statement {
+        .proof-text {
             color: #FFFFFF;
-            margin-bottom: 10px;
-            padding: 8px;
-            border-left: 2px solid #FFFFFF;
+            font-size: 10px;
+        }
+        .nav-button {
+            padding: 8px 12px;
+            background: #000000;
+            color: #FFFFFF;
+            border: 2px solid #FFFFFF;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            cursor: pointer;
             font-weight: bold;
         }
-        .proof-text {
-            color: #CCCCCC;
-            font-size: 9px;
+        .nav-button:hover {
+            background: #FFFFFF;
+            color: #000000;
+        }
+        .nav-button:active {
+            background: #CCCCCC;
+        }
+        #searchResults {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+        }
+        .search-result-item {
+            padding: 6px 10px;
+            cursor: pointer;
+            border-bottom: 1px solid #333333;
+            color: #FFFFFF;
+        }
+        .search-result-item:hover {
+            background: #333333;
+        }
+        .search-result-item.selected {
+            background: #FFFFFF;
+            color: #000000;
         }
         .legend {
             margin-top: 10px;
@@ -498,11 +553,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <h1>THEOREM EGO NETWORK</h1>
         
         <div class="controls">
-            <label for="theoremSelect">SELECT THEOREM:</label>
-            <select id="theoremSelect" onchange="updateNetwork()">
-                <option value="">-- SELECT --</option>
-            </select>
-            <button id="distanceToggle" class="toggle-button active" onclick="cycleDistance()">DISTANCE 2</button>
+            <label for="theoremInput">SELECT THEOREM:</label>
+            <div style="display: flex; align-items: center; gap: 5px; flex: 1; position: relative;">
+                <button id="prevButton" class="nav-button" onclick="navigateTheorem(-1)" title="Previous">◀</button>
+                <div style="flex: 1; position: relative;">
+                    <input type="text" id="theoremInput" placeholder="Type to search or select..." 
+                           style="width: 100%; padding: 8px; background: #000000; color: #FFFFFF; border: 2px solid #FFFFFF; font-family: 'Courier New', monospace; font-size: 12px; box-sizing: border-box;"
+                           oninput="handleSearchInput()" 
+                           onkeydown="handleSearchKeydown(event)"
+                           autocomplete="off">
+                    <div id="searchResults" style="display: none; position: absolute; z-index: 1000; background: #000000; border: 2px solid #FFFFFF; max-height: 200px; overflow-y: auto; margin-top: 2px; left: 0; right: 0; box-sizing: border-box;"></div>
+                </div>
+                <button id="nextButton" class="nav-button" onclick="navigateTheorem(1)" title="Next">▶</button>
+            </div>
+            <button id="distanceToggle" class="toggle-button active" onclick="cycleDistance()" style="margin-top: 10px;">DISTANCE 2</button>
+            <button id="downloadButton" class="toggle-button" onclick="downloadProofs()" style="margin-top: 10px; margin-left: 5px;" title="Download all proofs as markdown">DOWNLOAD PROOFS</button>
         </div>
         
         <div class="info note" style="margin-bottom: 10px;">
@@ -531,8 +596,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         <div class="proof-modal-title" id="proofModalTitle">THEOREM PROOF</div>
                     </div>
                     <div class="proof-content">
-                        <div class="proof-statement" id="proofStatement">-- NO THEOREM SELECTED --</div>
-                        <div class="proof-text" id="proofText"></div>
+                        <div class="proof-text" id="proofText">-- NO THEOREM SELECTED --</div>
                     </div>
                 </div>
             </div>
@@ -562,26 +626,182 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <script type="text/javascript">
         let network = null;
         let allTheorems = [];
+        let currentTheoremIndex = -1; // Current index in allTheorems
         let currentDistance = 2; // Default to distance 2
         let levelSeparators = []; // Store level separator y-positions
         let currentNodeDataSet = null; // Store current node dataset
         let hoveredNodeId = null; // Track currently hovered node
         let nodeLabels = {}; // Store label elements for opacity control
+        let searchResults = []; // Filtered search results
+        let selectedSearchIndex = -1; // Currently selected search result
         
-        // Load theorem list on page load
-        fetch('/api/theorems')
-            .then(response => response.json())
-            .then(data => {
-                allTheorems = data.theorems;
-                const select = document.getElementById('theoremSelect');
-                allTheorems.forEach(theorem => {
-                    const shortName = theorem.split('.').pop() || theorem.substring(0, 60);
-                    const option = document.createElement('option');
-                    option.value = theorem;
-                    option.textContent = shortName;
-                    select.appendChild(option);
+        // Load random theorem on page load (lazy load full list)
+        window.addEventListener('DOMContentLoaded', function() {
+            updateDistanceButton();
+            // Start with a random theorem (doesn't require full list)
+            fetch('/api/theorem/random')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.theorem) {
+                        setCurrentTheorem(data.theorem, true);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading random theorem:', error);
                 });
+            
+            // Load full list in background for navigation/search (non-blocking)
+            ensureTheoremsLoaded().catch(error => {
+                console.error('Error loading theorems list:', error);
             });
+        });
+        
+        // Lazy load full theorem list when needed (for search/navigation)
+        function ensureTheoremsLoaded() {
+            if (allTheorems.length === 0) {
+                return fetch('/api/theorems')
+                    .then(response => response.json())
+                    .then(data => {
+                        allTheorems = data.theorems;
+                        return allTheorems;
+                    });
+            }
+            return Promise.resolve(allTheorems);
+        }
+        
+        function setCurrentTheorem(theorem, updateInput = true) {
+            if (updateInput) {
+                const input = document.getElementById('theoremInput');
+                if (input) {
+                    input.value = theorem;
+                }
+            }
+            // Update index if theorems are loaded
+            if (allTheorems.length > 0) {
+                currentTheoremIndex = allTheorems.indexOf(theorem);
+            }
+            updateNetwork();
+        }
+        
+        function navigateTheorem(direction) {
+            ensureTheoremsLoaded().then(() => {
+                if (allTheorems.length === 0) return;
+                
+                if (currentTheoremIndex === -1) {
+                    // If no current theorem, start at 0 or random
+                    currentTheoremIndex = direction > 0 ? 0 : allTheorems.length - 1;
+                } else {
+                    currentTheoremIndex += direction;
+                    if (currentTheoremIndex < 0) {
+                        currentTheoremIndex = allTheorems.length - 1;
+                    } else if (currentTheoremIndex >= allTheorems.length) {
+                        currentTheoremIndex = 0;
+                    }
+                }
+                
+                const theorem = allTheorems[currentTheoremIndex];
+                setCurrentTheorem(theorem, true);
+            });
+        }
+        
+        function handleSearchInput() {
+            const input = document.getElementById('theoremInput');
+            const query = input.value.trim().toLowerCase();
+            const resultsDiv = document.getElementById('searchResults');
+            
+            if (query.length === 0) {
+                resultsDiv.style.display = 'none';
+                selectedSearchIndex = -1;
+                return;
+            }
+            
+            ensureTheoremsLoaded().then(() => {
+                // Filter theorems that match the query
+                searchResults = allTheorems.filter(theorem => 
+                    theorem.toLowerCase().includes(query) || 
+                    theorem.split('.').pop().toLowerCase().includes(query)
+                ).slice(0, 20); // Limit to 20 results
+                
+                selectedSearchIndex = -1;
+                displaySearchResults();
+            });
+        }
+        
+        function displaySearchResults() {
+            const resultsDiv = document.getElementById('searchResults');
+            
+            if (searchResults.length === 0) {
+                resultsDiv.style.display = 'none';
+                return;
+            }
+            
+            resultsDiv.innerHTML = '';
+            searchResults.forEach((theorem, index) => {
+                const item = document.createElement('div');
+                item.className = 'search-result-item';
+                if (index === selectedSearchIndex) {
+                    item.classList.add('selected');
+                }
+                const shortName = theorem.split('.').pop() || theorem.substring(0, 60);
+                item.textContent = shortName;
+                item.title = theorem; // Full name in tooltip
+                item.onclick = () => {
+                    setCurrentTheorem(theorem, true);
+                    resultsDiv.style.display = 'none';
+                };
+                resultsDiv.appendChild(item);
+            });
+            
+            resultsDiv.style.display = 'block';
+        }
+        
+        function handleSearchKeydown(event) {
+            const resultsDiv = document.getElementById('searchResults');
+            
+            if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                if (selectedSearchIndex < searchResults.length - 1) {
+                    selectedSearchIndex++;
+                    displaySearchResults();
+                }
+            } else if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                if (selectedSearchIndex > 0) {
+                    selectedSearchIndex--;
+                    displaySearchResults();
+                } else {
+                    selectedSearchIndex = -1;
+                    displaySearchResults();
+                }
+            } else if (event.key === 'Enter') {
+                event.preventDefault();
+                if (selectedSearchIndex >= 0 && selectedSearchIndex < searchResults.length) {
+                    const theorem = searchResults[selectedSearchIndex];
+                    setCurrentTheorem(theorem, true);
+                    resultsDiv.style.display = 'none';
+                } else if (searchResults.length === 1) {
+                    // If only one result, select it
+                    setCurrentTheorem(searchResults[0], true);
+                    resultsDiv.style.display = 'none';
+                } else if (searchResults.length > 0) {
+                    // Select first result if multiple
+                    setCurrentTheorem(searchResults[0], true);
+                    resultsDiv.style.display = 'none';
+                }
+            } else if (event.key === 'Escape') {
+                resultsDiv.style.display = 'none';
+                selectedSearchIndex = -1;
+            }
+        }
+        
+        // Close search results when clicking outside
+        document.addEventListener('click', function(event) {
+            const input = document.getElementById('theoremInput');
+            const resultsDiv = document.getElementById('searchResults');
+            if (input && resultsDiv && !input.contains(event.target) && !resultsDiv.contains(event.target)) {
+                resultsDiv.style.display = 'none';
+            }
+        });
         
         function cycleDistance() {
             // Cycle: 2 -> 3 -> 1 -> 2 -> ...
@@ -610,8 +830,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function closeProofModal() {
             // Clear the modal content but keep it visible
             document.getElementById('proofModalTitle').textContent = 'THEOREM PROOF';
-            document.getElementById('proofStatement').textContent = '-- NO THEOREM SELECTED --';
-            document.getElementById('proofText').textContent = '';
+            document.getElementById('proofText').textContent = '-- NO THEOREM SELECTED --';
             document.getElementById('proofModal').classList.add('empty');
         }
         
@@ -632,25 +851,46 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 .then(data => {
                     if (data.success) {
                         document.getElementById('proofModalTitle').textContent = theoremName;
-                        document.getElementById('proofStatement').textContent = data.statement || '(No statement available)';
                         document.getElementById('proofText').textContent = data.proof_text || data.code || '(No proof available)';
                     } else {
                         document.getElementById('proofModalTitle').textContent = theoremName;
-                        document.getElementById('proofStatement').textContent = '-- NOT FOUND --';
                         document.getElementById('proofText').textContent = data.error || 'Theorem not found in corpus';
                     }
                 })
                 .catch(error => {
                     console.error('Error:', error);
                     document.getElementById('proofModalTitle').textContent = theoremName;
-                    document.getElementById('proofStatement').textContent = '-- ERROR --';
                     document.getElementById('proofText').textContent = 'Error loading proof: ' + error.message;
                 });
         }
         
+        function downloadProofs() {
+            const input = document.getElementById('theoremInput');
+            const theorem = input ? input.value.trim() : '';
+            
+            if (!theorem) {
+                alert('Please select a theorem first');
+                return;
+            }
+            
+            // Get current distance
+            const distance = currentDistance;
+            
+            // Create download link
+            const url = `/api/download-proofs/${encodeURIComponent(theorem)}/${distance}`;
+            const link = document.createElement('a');
+            link.href = url;
+            // Sanitize filename: replace dots and slashes with underscores
+            const safeFilename = theorem.replace(/\./g, '_').replace(/\//g, '_') + `_distance${distance}_proofs.md`;
+            link.download = safeFilename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+        
         function updateNetwork() {
-            const select = document.getElementById('theoremSelect');
-            const theorem = select.value;
+            const input = document.getElementById('theoremInput');
+            const theorem = input ? input.value.trim() : '';
             const infoDiv = document.getElementById('networkInfo');
             const infoText = document.getElementById('infoText');
             
@@ -1089,9 +1329,8 @@ def index():
     return render_template_string(HTML_TEMPLATE)
 
 
-@app.route('/api/theorems')
-def get_theorems():
-    """API endpoint to get list of all theorems."""
+def get_sorted_theorems():
+    """Helper function to get sorted theorem list."""
     # Sort theorems: those with children first, then alphabetically
     if G_original and ego_network_data:
         Out = {n: set(G_original.successors(n)) for n in G_original.nodes()}
@@ -1107,7 +1346,50 @@ def get_theorems():
     else:
         theorems_sorted = sorted(theorems_list, key=lambda x: x.split('.')[-1] if '.' in x else x)
     
+    return theorems_sorted
+
+
+@app.route('/api/theorems')
+def get_theorems():
+    """API endpoint to get list of all theorems."""
+    theorems_sorted = get_sorted_theorems()
     return jsonify({"theorems": theorems_sorted})
+
+
+@app.route('/api/theorem/random')
+def get_random_theorem():
+    """API endpoint to get a random theorem."""
+    import random
+    theorems_sorted = get_sorted_theorems()
+    if theorems_sorted:
+        random_theorem = random.choice(theorems_sorted)
+        return jsonify({"success": True, "theorem": random_theorem})
+    else:
+        return jsonify({"success": False, "error": "No theorems available"})
+
+
+@app.route('/api/theorem/<theorem>/next')
+def get_next_theorem(theorem):
+    """API endpoint to get next theorem in sequence."""
+    theorems_sorted = get_sorted_theorems()
+    try:
+        index = theorems_sorted.index(theorem)
+        next_index = (index + 1) % len(theorems_sorted)
+        return jsonify({"success": True, "theorem": theorems_sorted[next_index]})
+    except ValueError:
+        return jsonify({"success": False, "error": "Theorem not found"})
+
+
+@app.route('/api/theorem/<theorem>/prev')
+def get_prev_theorem(theorem):
+    """API endpoint to get previous theorem in sequence."""
+    theorems_sorted = get_sorted_theorems()
+    try:
+        index = theorems_sorted.index(theorem)
+        prev_index = (index - 1) % len(theorems_sorted)
+        return jsonify({"success": True, "theorem": theorems_sorted[prev_index]})
+    except ValueError:
+        return jsonify({"success": False, "error": "Theorem not found"})
 
 
 @app.route('/api/ego/<theorem>')
@@ -1143,13 +1425,22 @@ def get_ego_network_with_distance(theorem, distance=1):
 
 @app.route('/api/theorem/<theorem>')
 def get_theorem_proof(theorem):
-    """API endpoint to get theorem code from corpus."""
-    if not corpus_code_index:
-        return jsonify({"success": False, "error": "Corpus code index not loaded. Run 00_corpus_to_code.py first."})
+    """API endpoint to get theorem proof from traced_theorems_unified_v2.jsonl (preferred) or corpus."""
+    # Priority 1: Check traced_theorems_unified_v2.jsonl (has original proof_text)
+    if traced_theorems_index and theorem in traced_theorems_index:
+        entry = traced_theorems_index[theorem]
+        return jsonify({
+            "success": True,
+            "statement": entry.get("statement", ""),
+            "proof_text": entry.get("proof_text", ""),
+            "code": entry.get("proof_text", ""),  # For compatibility
+            "proof_type": entry.get("proof_type", "tactic")
+        })
     
-    code = corpus_code_index.get(theorem, "")
-    
-    if code:
+    # Priority 2: Fall back to corpus_code_index.json
+    if corpus_code_index and theorem in corpus_code_index:
+        code = corpus_code_index[theorem]
+        
         # Try to extract statement from code (basic parsing)
         statement = ""
         if code.startswith("theorem"):
@@ -1173,8 +1464,102 @@ def get_theorem_proof(theorem):
             "code": code,
             "proof_type": "corpus"  # Indicates it's from corpus
         })
-    else:
-        return jsonify({"success": False, "error": f"Theorem '{theorem}' not found in corpus"})
+    
+    # Not found in either source
+    return jsonify({"success": False, "error": f"Theorem '{theorem}' not found in traced theorems or corpus"})
+
+
+@app.route('/api/download-proofs/<theorem>/<int:distance>')
+def download_proofs(theorem, distance):
+    """API endpoint to download all proofs from ego network as markdown."""
+    from flask import Response
+    
+    if not G_original:
+        return jsonify({"success": False, "error": "Graph not loaded"}), 500
+    
+    if theorem not in G_original:
+        return jsonify({"success": False, "error": "Theorem not found"}), 404
+    
+    if not traced_theorems_index and not corpus_code_index:
+        return jsonify({"success": False, "error": "Neither traced theorems nor corpus code index loaded"}), 500
+    
+    # Generate ego network to get all nodes
+    network_data = generate_ego_network_for_theorem(theorem, G_original, distance=distance)
+    
+    if network_data is None:
+        return jsonify({"success": False, "error": "Failed to generate network data"}), 500
+    
+    # Extract all unique node IDs from the network
+    nodes = network_data.get("nodes", [])
+    node_ids = set()
+    for node in nodes:
+        node_id = node.get("id") or node.get("label")
+        if node_id:
+            node_ids.add(node_id)
+    
+    # Sort nodes for consistent output
+    sorted_nodes = sorted(node_ids)
+    
+    # Build markdown content
+    md_lines = []
+    md_lines.append(f"# Ego Network Proofs: {theorem}")
+    md_lines.append("")
+    md_lines.append(f"**Distance Level:** {distance}")
+    md_lines.append(f"**Total Nodes:** {len(sorted_nodes)}")
+    md_lines.append("")
+    md_lines.append("---")
+    md_lines.append("")
+    
+    # Add proof for each node
+    for i, node_id in enumerate(sorted_nodes, 1):
+        md_lines.append(f"## {i}. {node_id}")
+        md_lines.append("")
+        
+        # Priority 1: Get proof from traced_theorems_unified_v2.jsonl (original proof_text)
+        proof_text = ""
+        statement = ""
+        source = "none"
+        
+        if traced_theorems_index and node_id in traced_theorems_index:
+            entry = traced_theorems_index[node_id]
+            proof_text = entry.get("proof_text", "")
+            statement = entry.get("statement", "")
+            source = "traced"
+        elif corpus_code_index and node_id in corpus_code_index:
+            proof_text = corpus_code_index[node_id]
+            source = "corpus"
+        
+        if proof_text:
+            # Add statement if available
+            if statement:
+                md_lines.append(f"**Statement:** `{statement}`")
+                md_lines.append("")
+            md_lines.append("```lean")
+            md_lines.append(proof_text)
+            md_lines.append("```")
+            if source == "traced":
+                md_lines.append("")
+                md_lines.append("*Source: traced_theorems_unified_v2.jsonl (original proof)*")
+        else:
+            md_lines.append("*Proof not available*")
+        
+        md_lines.append("")
+        md_lines.append("---")
+        md_lines.append("")
+    
+    # Convert to string
+    md_content = "\n".join(md_lines)
+    
+    # Create response with proper headers for file download
+    response = Response(
+        md_content,
+        mimetype='text/markdown',
+        headers={
+            'Content-Disposition': f'attachment; filename="{theorem.replace(".", "_").replace("/", "_")}_distance{distance}_proofs.md"'
+        }
+    )
+    
+    return response
 
 
 def generate_ego_network_for_theorem(theorem, G, distance=1):
