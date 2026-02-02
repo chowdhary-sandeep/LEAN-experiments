@@ -115,8 +115,20 @@ try:
         print(f"  Generated ego network data for {len(theorems_list):,} theorems")
     else:
         print(f"  Loaded {len(theorems_list):,} theorems from cache")
+    
+    # Calculate percentage of leaf nodes (theorems with no children)
+    if G_original and theorems_list:
+        Out = {n: set(G_original.successors(n)) for n in G_original.nodes()}
+        theorems_with_children = [t for t in theorems_list if len(Out.get(t, [])) > 0]
+        leaf_theorems = len(theorems_list) - len(theorems_with_children)
+        leaf_percentage = (leaf_theorems / len(theorems_list) * 100) if theorems_list else 0
+        print(f"  Leaf nodes: {leaf_theorems:,} ({leaf_percentage:.1f}%)")
+        print(f"  Theorems with children: {len(theorems_with_children):,}")
+    else:
+        leaf_percentage = 0
 except Exception as e:
     print(f"Error loading cache: {e}")
+    leaf_percentage = 0
     import traceback
     traceback.print_exc()
     G_original = None
@@ -578,10 +590,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
             <button id="distanceToggle" class="toggle-button active" onclick="cycleDistance()" style="margin-top: 10px;">DISTANCE 2</button>
             <button id="downloadButton" class="toggle-button" onclick="downloadProofs()" style="margin-top: 10px; margin-left: 5px;" title="Download all proofs as markdown">DOWNLOAD PROOFS</button>
-        </div>
-        
-        <div class="info note" style="margin-bottom: 10px;">
-            <strong>NOTE:</strong> Most theorems (88%) are leaf nodes with no children. Theorems with children are listed first in the dropdown.
         </div>
         
         <div class="info" id="networkInfo" style="display: none;">
