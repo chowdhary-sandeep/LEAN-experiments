@@ -476,6 +476,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             flex: 1;
             overflow: auto;
         }
+        .proof-statement {
+            color: #FFFFFF;
+            margin-bottom: 15px;
+            padding: 8px;
+            border-left: 2px solid #FFFFFF;
+            font-weight: bold;
+            font-size: 11px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
         .proof-text {
             color: #FFFFFF;
             font-size: 10px;
@@ -596,7 +606,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         <div class="proof-modal-title" id="proofModalTitle">THEOREM PROOF</div>
                     </div>
                     <div class="proof-content">
-                        <div class="proof-text" id="proofText">-- NO THEOREM SELECTED --</div>
+                        <div class="proof-statement" id="proofStatement">-- NO THEOREM SELECTED --</div>
+                        <div class="proof-text" id="proofText"></div>
                     </div>
                 </div>
             </div>
@@ -830,7 +841,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function closeProofModal() {
             // Clear the modal content but keep it visible
             document.getElementById('proofModalTitle').textContent = 'THEOREM PROOF';
-            document.getElementById('proofText').textContent = '-- NO THEOREM SELECTED --';
+            document.getElementById('proofStatement').textContent = '-- NO THEOREM SELECTED --';
+            document.getElementById('proofText').textContent = '';
             document.getElementById('proofModal').classList.add('empty');
         }
         
@@ -851,15 +863,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 .then(data => {
                     if (data.success) {
                         document.getElementById('proofModalTitle').textContent = theoremName;
+                        // Display statement above proof text
+                        document.getElementById('proofStatement').textContent = data.statement || '(No statement available)';
                         document.getElementById('proofText').textContent = data.proof_text || data.code || '(No proof available)';
                     } else {
                         document.getElementById('proofModalTitle').textContent = theoremName;
+                        document.getElementById('proofStatement').textContent = '-- NOT FOUND --';
                         document.getElementById('proofText').textContent = data.error || 'Theorem not found in corpus';
                     }
                 })
                 .catch(error => {
                     console.error('Error:', error);
                     document.getElementById('proofModalTitle').textContent = theoremName;
+                    document.getElementById('proofStatement').textContent = '-- ERROR --';
                     document.getElementById('proofText').textContent = 'Error loading proof: ' + error.message;
                 });
         }
@@ -908,6 +924,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             
             // Set central theorem for auto-selection
             centralTheoremNode = theorem;
+            
+            // Show proof immediately (statement and proof text)
+            showProof(theorem);
             
             // Fetch ego network data with current distance
             fetch(`/api/ego/${encodeURIComponent(theorem)}/${currentDistance}`)

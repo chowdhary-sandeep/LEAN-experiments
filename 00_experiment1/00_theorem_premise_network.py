@@ -133,109 +133,109 @@ else:
     measures = None
     ego_networks = None
     graph_build_start = time.time()
-    # First, count total lines for progress bar
+# First, count total lines for progress bar
     print("  Cache not found or outdated; building from data.")
-    print("Counting lines in file...")
-    total_lines = 0
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        for _ in f:
-            total_lines += 1
-    print(f"  Total lines: {total_lines:,}")
+print("Counting lines in file...")
+total_lines = 0
+with open(DATA_FILE, "r", encoding="utf-8") as f:
+    for _ in f:
+        total_lines += 1
+print(f"  Total lines: {total_lines:,}")
 
-    # Build dependency graph: premise -> theorem (theorem uses premise)
-    print("\n" + "=" * 80)
-    print("Building theorem-premise dependency graph...")
-    print("=" * 80)
-    print("  (Only processing theorems with proof_type='tactic')")
+# Build dependency graph: premise -> theorem (theorem uses premise)
+print("\n" + "=" * 80)
+print("Building theorem-premise dependency graph...")
+print("=" * 80)
+print("  (Only processing theorems with proof_type='tactic')")
 
-    G = nx.DiGraph()
-    theorems_processed = 0
-    theorems_skipped = 0
+G = nx.DiGraph()
+theorems_processed = 0
+theorems_skipped = 0
     n_term = 0
-    premises_seen = set()
-    theorems_seen = set()
+premises_seen = set()
+theorems_seen = set()
 
-    # Build graph efficiently - process incrementally to save memory
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        # Create progress bar
-        if HAS_TQDM:
-            pbar = tqdm(total=total_lines, desc="Processing", unit="lines")
-        else:
-            pbar = None
-            last_progress = 0
+# Build graph efficiently - process incrementally to save memory
+with open(DATA_FILE, "r", encoding="utf-8") as f:
+    # Create progress bar
+    if HAS_TQDM:
+        pbar = tqdm(total=total_lines, desc="Processing", unit="lines")
+    else:
+        pbar = None
+        last_progress = 0
+    
+    for i, line in enumerate(f):
+        if pbar:
+            pbar.update(1)
+        elif i % 10000 == 0:
+            progress = int((i / total_lines) * 100) if total_lines > 0 else 0
+            if progress != last_progress:
+                print(f"  Progress: {progress}% ({i:,}/{total_lines:,} lines)")
+                last_progress = progress
         
-        for i, line in enumerate(f):
-            if pbar:
-                pbar.update(1)
-            elif i % 10000 == 0:
-                progress = int((i / total_lines) * 100) if total_lines > 0 else 0
-                if progress != last_progress:
-                    print(f"  Progress: {progress}% ({i:,}/{total_lines:,} lines)")
-                    last_progress = progress
-            
-            line = line.strip()
-            if not line:
-                continue
+        line = line.strip()
+        if not line:
+            continue
 
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
 
-            # Only process theorems with proof_type == "tactic"
-            proof_type = entry.get("proof_type", "")
-            if proof_type != "tactic":
-                theorems_skipped += 1
+        # Only process theorems with proof_type == "tactic"
+        proof_type = entry.get("proof_type", "")
+        if proof_type != "tactic":
+            theorems_skipped += 1
                 if proof_type == "term":
                     n_term += 1
-                continue
+            continue
 
-            # Get theorem full_name (target node - this is the first key in the row)
-            theorem_full_name = entry.get("full_name")
-            if not theorem_full_name:
-                continue
+        # Get theorem full_name (target node - this is the first key in the row)
+        theorem_full_name = entry.get("full_name")
+        if not theorem_full_name:
+            continue
 
-            # Add theorem node (target)
-            G.add_node(theorem_full_name, node_type="theorem")
-            theorems_seen.add(theorem_full_name)
+        # Add theorem node (target)
+        G.add_node(theorem_full_name, node_type="theorem")
+        theorems_seen.add(theorem_full_name)
 
-            # Get premises from all_premises dictionary
-            # The keys of all_premises are the premise full_names (source nodes)
-            all_premises = entry.get("all_premises", {})
-            
-            # Iterate over premise full_names (keys of all_premises dict)
+        # Get premises from all_premises dictionary
+        # The keys of all_premises are the premise full_names (source nodes)
+        all_premises = entry.get("all_premises", {})
+        
+        # Iterate over premise full_names (keys of all_premises dict)
             # Skip tactics and hypothesis names (simpa, hx, symm, etc.) - not real lemmas
-            for premise_full_name in all_premises.keys():
+        for premise_full_name in all_premises.keys():
                 if not premise_full_name or _is_tactic_or_hyp(premise_full_name):
-                    continue
-                
-                # Add premise node (source)
+                continue
+            
+            # Add premise node (source)
                 # If node already exists as a theorem, keep it as theorem (theorem can be used as premise)
                 if premise_full_name not in G:
-                    G.add_node(premise_full_name, node_type="premise")
-                    premises_seen.add(premise_full_name)
+            G.add_node(premise_full_name, node_type="premise")
+            premises_seen.add(premise_full_name)
                 elif G.nodes[premise_full_name].get("node_type") == "theorem":
                     # This premise is actually a theorem - don't change its type
                     premises_seen.add(premise_full_name)  # Still count as premise usage
-                
-                # Add edge: premise (source) -> theorem (target)
-                # This represents "theorem uses premise"
-                # Avoid self-loops
-                if premise_full_name != theorem_full_name:
-                    G.add_edge(premise_full_name, theorem_full_name)
+            
+            # Add edge: premise (source) -> theorem (target)
+            # This represents "theorem uses premise"
+            # Avoid self-loops
+            if premise_full_name != theorem_full_name:
+                G.add_edge(premise_full_name, theorem_full_name)
 
-            theorems_processed += 1
-        
-        if pbar:
-            pbar.close()
+        theorems_processed += 1
+    
+    if pbar:
+        pbar.close()
 
     graph_build_time = time.time() - graph_build_start
     total_theorems = theorems_processed + theorems_skipped
-    # Pre-compute degrees once for efficiency
-    degree_start = time.time()
-    in_degrees = dict(G.in_degree())
-    out_degrees = dict(G.out_degree())
-    degree_time = time.time() - degree_start
+# Pre-compute degrees once for efficiency
+degree_start = time.time()
+in_degrees = dict(G.in_degree())
+out_degrees = dict(G.out_degree())
+degree_time = time.time() - degree_start
     G_original = G.copy()
     in_degrees_original = in_degrees.copy()
     out_degrees_original = out_degrees.copy()
@@ -251,7 +251,7 @@ print(f"    - Premises: {len(premises_seen):,}")
 print(f"    - Theorems: {len(theorems_seen):,}")
 print(f"  Edges (premise->theorem): {G.number_of_edges():,}")
 if not from_cache:
-    print(f"  Degrees computed in {degree_time:.3f}s")
+print(f"  Degrees computed in {degree_time:.3f}s")
 
 # Find root nodes (premises not used by any theorem) and leaves (theorems that don't use any premises)
 roots = [n for n, deg in in_degrees.items() if deg == 0]
@@ -1763,26 +1763,26 @@ if measures is not None and ego_networks is not None:
     else:
         print("\nFeedback Arc Set: No edges removed (graph was already a DAG)")
 else:
-    print("\nComputing measures...")
-    measures_start = time.time()
-    measures = compute_dag_measures(G_original, in_degrees_original, out_degrees_original)
+print("\nComputing measures...")
+measures_start = time.time()
+measures = compute_dag_measures(G_original, in_degrees_original, out_degrees_original)
     measures['proof_types'] = {
         'tactic': theorems_processed,
         'term': n_term,
         'total': total_theorems
     }
-    measures_time = time.time() - measures_start
-    print(f"Measures computed in {measures_time:.2f}s")
+measures_time = time.time() - measures_start
+print(f"Measures computed in {measures_time:.2f}s")
 
-    # Find extreme nodes
-    extreme_nodes = find_extreme_nodes(measures, G_original, in_degrees_original, out_degrees_original, top_k=5)
+# Find extreme nodes
+extreme_nodes = find_extreme_nodes(measures, G_original, in_degrees_original, out_degrees_original, top_k=5)
 
-    # Extract ego networks (only for nodes that will be visualized)
-    print("\nExtracting ego networks...")
-    ego_start = time.time()
-    ego_networks = extract_ego_networks(G_original, extreme_nodes, measures, max_nodes=50, max_ego_networks=100)  # Will select 3 per type
-    ego_time = time.time() - ego_start
-    print(f"Ego networks extracted in {ego_time:.2f}s")
+# Extract ego networks (only for nodes that will be visualized)
+print("\nExtracting ego networks...")
+ego_start = time.time()
+ego_networks = extract_ego_networks(G_original, extreme_nodes, measures, max_nodes=50, max_ego_networks=100)  # Will select 3 per type
+ego_time = time.time() - ego_start
+print(f"Ego networks extracted in {ego_time:.2f}s")
 
     # Compute transitivity and motifs
     transitivity = compute_transitivity(G_original, in_degrees_original)
@@ -2137,9 +2137,9 @@ Term proofs: {term_pct:.1f}%"""
             for b, v in zip(bars, vals):
                 ax5.text(b.get_x() + b.get_width() / 2, b.get_height() + max(vals) * 0.01,
                         f'{v:,}', ha='center', va='bottom', fontsize=9)
-        else:
-            ax5.text(0.5, 0.5, 'No level data', ha='center', va='center', transform=ax5.transAxes)
-            ax5.set_title('Level Distribution', fontsize=12, fontweight='normal', pad=10)
+    else:
+        ax5.text(0.5, 0.5, 'No level data', ha='center', va='center', transform=ax5.transAxes)
+        ax5.set_title('Level Distribution', fontsize=12, fontweight='normal', pad=10)
     ax5.tick_params(labelsize=8)
     
     # Panel 6: Component Size Distribution (log-log)
@@ -2262,8 +2262,8 @@ def create_ego_figure(ego_networks, output_pdf, output_png, G_ref):
     for idx in range(len(ego_networks), n_rows * n_cols):
         row = idx // n_cols
         col = idx % n_cols
-        ax = fig.add_subplot(gs[row, col])
-        ax.axis('off')
+            ax = fig.add_subplot(gs[row, col])
+            ax.axis('off')
     
     print(f"  Saving ego figure to {output_pdf} and {output_png}...")
     plt.savefig(output_pdf, dpi=300, bbox_inches='tight', facecolor='white', edgecolor='none')
