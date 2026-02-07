@@ -210,10 +210,34 @@ def generate_html(theorems_with_dags, output_path):
         # Prepare nodes for vis-network (black and white only)
         vis_nodes = []
         for node_id, node_info in dag["nodes"].items():
+            # Build informative tooltip
+            goal = node_info.get("goal", "")
+            state = node_info.get("state", "")
+            num_goals = node_info.get("num_goals", 0)
+            num_hyps = node_info.get("num_hypotheses", 0)
+            num_vars = node_info.get("num_variables", 0)
+
+            # Create tooltip with all available info
+            tooltip_parts = []
+            if goal:
+                tooltip_parts.append(f"GOAL: {goal}")
+            elif state:
+                # If no parsed goal, show raw state (truncated)
+                tooltip_parts.append(f"STATE: {state[:200]}")
+
+            if num_goals > 0:
+                tooltip_parts.append(f"Goals: {num_goals}")
+            if num_hyps > 0:
+                tooltip_parts.append(f"Hypotheses: {num_hyps}")
+            if num_vars > 0:
+                tooltip_parts.append(f"Variables: {num_vars}")
+
+            tooltip = " | ".join(tooltip_parts) if tooltip_parts else "Initial/Terminal state"
+
             node = {
                 'id': node_id,
                 'label': node_info.get("label", node_id[:6]),
-                'title': node_info.get("goal", "")  # Tooltip on hover
+                'title': tooltip  # Rich tooltip with all context
             }
 
             # Black and white only - use border width to distinguish
