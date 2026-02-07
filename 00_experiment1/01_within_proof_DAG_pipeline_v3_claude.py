@@ -92,11 +92,8 @@ def build_proof_dag(theorem):
         # Count goals in state string
         num_goals = state_str.count("⊢") if state_str else 0
 
-        # Create meaningful label: state number + goal count
-        if num_goals > 0:
-            label = f"s{state_num}\n({num_goals}g)"
-        else:
-            label = f"s{state_num}"
+        # Simple label: just state number (goal count removed per user request)
+        label = f"s{state_num}"
 
         nodes[node_id] = {
             "id": node_id,
@@ -210,34 +207,42 @@ def generate_html(theorems_with_dags, output_path):
         # Prepare nodes for vis-network (black and white only)
         vis_nodes = []
         for node_id, node_info in dag["nodes"].items():
-            # Build informative tooltip
+            # Build compact tooltip (70% font size, minimal spacing)
             goal = node_info.get("goal", "")
             state = node_info.get("state", "")
             num_goals = node_info.get("num_goals", 0)
             num_hyps = node_info.get("num_hypotheses", 0)
             num_vars = node_info.get("num_variables", 0)
 
-            # Create tooltip with all available info
-            tooltip_parts = []
-            if goal:
-                tooltip_parts.append(f"GOAL: {goal}")
-            elif state:
-                # If no parsed goal, show raw state (truncated)
-                tooltip_parts.append(f"STATE: {state[:200]}")
+            # Create compact HTML tooltip with reduced font size
+            tooltip_lines = []
 
+            # Context info (compact, single line)
+            context_parts = []
             if num_goals > 0:
-                tooltip_parts.append(f"Goals: {num_goals}")
+                context_parts.append(f"{num_goals}g")
             if num_hyps > 0:
-                tooltip_parts.append(f"Hypotheses: {num_hyps}")
+                context_parts.append(f"{num_hyps}h")
             if num_vars > 0:
-                tooltip_parts.append(f"Variables: {num_vars}")
+                context_parts.append(f"{num_vars}v")
 
-            tooltip = " | ".join(tooltip_parts) if tooltip_parts else "Initial/Terminal state"
+            if context_parts:
+                tooltip_lines.append(" ".join(context_parts))
+
+            # State/goal info
+            if goal:
+                tooltip_lines.append(goal[:150])
+            elif state:
+                tooltip_lines.append(state[:150])
+
+            # Join with line breaks (compact)
+            tooltip_text = "\\n".join(tooltip_lines) if tooltip_lines else "State"
 
             node = {
                 'id': node_id,
                 'label': node_info.get("label", node_id[:6]),
-                'title': tooltip  # Rich tooltip with all context
+                'title': tooltip_text,  # Plain text for default tooltip (will be overridden by custom)
+                'tooltip_html': tooltip_text  # Store for custom HTML tooltip
             }
 
             # Black and white only - use border width to distinguish
@@ -416,6 +421,21 @@ def generate_html(theorems_with_dags, output_path):
             width: 100%;
             height: 100%;
         }}
+        .custom-tooltip {{
+            position: fixed;
+            background-color: #FFFFFF;
+            border: 2px solid #000000;
+            padding: 4px 6px;
+            font-size: 8px;
+            line-height: 1.2;
+            font-family: 'Courier New', monospace;
+            z-index: 10000;
+            pointer-events: none;
+            display: none;
+            max-width: 300px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }}
     </style>
 </head>
 <body>
@@ -437,6 +457,7 @@ def generate_html(theorems_with_dags, output_path):
     <div class="grid-container">
         {''.join(grid_html)}
     </div>
+    <div class="custom-tooltip" id="custom-tooltip"></div>
     <script type="text/javascript">
         // Store all theorem data
         const allTheoremsData = {all_data_json_js};
@@ -530,6 +551,23 @@ def generate_html(theorems_with_dags, output_path):
                 }};
 
                 networks[i] = new vis.Network(networkEl, data, options);
+
+                // Add custom tooltip on hover
+                networks[i].on("hoverNode", function(params) {{
+                    const nodeId = params.node;
+                    const nodeData = theoremData.nodes.find(n => n.id === nodeId);
+                    if (nodeData && nodeData.tooltip_html) {{
+                        const tooltip = document.getElementById('custom-tooltip');
+                        tooltip.textContent = nodeData.tooltip_html;
+                        tooltip.style.display = 'block';
+                        tooltip.style.left = params.event.center.x + 15 + 'px';
+                        tooltip.style.top = params.event.center.y + 15 + 'px';
+                    }}
+                }});
+
+                networks[i].on("blurNode", function(params) {{
+                    document.getElementById('custom-tooltip').style.display = 'none';
+                }});
             }}
 
             // Update page info
