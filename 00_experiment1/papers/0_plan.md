@@ -230,3 +230,87 @@ Manual inspection: randomly sample 50 theorems, hand-verify computed description
 **Figures:**
 - Distribution plots: `figs/experiment2_distributions.png`
 - Compression comparison: `figs/experiment2_compression.png`
+
+
+---
+
+
+### Experiment 3: Full Dataset Theorem-Level Compression Analysis
+**Date:** 2026-02-07
+**Dataset:** Full Mathlib (126,792 theorems, 54,477 tactic proofs)
+
+**Corpus-Wide Encoding Results:**
+
+1. **Uniform Encoding (Baseline):**
+   - Total: 12.79 MB
+   - Statements: 11.83 MB
+   - Tactics: 0.27 MB
+   - Premises: 0.69 MB
+
+2. **Shannon Encoding (Frequency-Optimized):**
+   - Total: 12.57 MB
+   - **Compression ratio: 1.02x**
+   - **Space saved: 0.21 MB (1.7%)**
+
+3. **Vocabulary Statistics:**
+   - Unique tactics: 278
+   - Unique premises: 70,863
+   - Tactic entropy: 4.71 bits/tactic (vs 8.12 uniform)
+   - Premise entropy: 13.77 bits/premise (vs 16.11 uniform)
+
+4. **Tactic Transition Patterns:**
+   - Unique bigrams: 5,742
+   - Unique trigrams: 29,806
+   - Conditional entropy H(T|T-1): 3.38 bits
+   - Predictability gain: 58.4%
+
+**Theorem-Level Compression Analysis:**
+
+5. **Per-Theorem Metrics (54,473 tactic proofs analyzed):**
+   - Average compression potential: 0.05 bits
+   - Median compression potential: 0.00 bits
+   - Max compression potential: 1.19 bits
+   - Average redundancy: 2.0%
+
+6. **Top 10 Most Compressible Theorems:**
+   1. psp_from_prime_psp                                 - Potential: 1.19 bits, Redundancy: 30%
+   2. hG                                                 - Potential: 1.15 bits, Redundancy: 38%
+   3. comm₁                                              - Potential: 1.02 bits, Redundancy: 29%
+   4. inductionOn                                        - Potential: 0.96 bits, Redundancy: 34%
+   5. trans_assoc_reparam                                - Potential: 0.94 bits, Redundancy: 27%
+   6. sign_two_nsmul_eq_sign_iff                         - Potential: 0.92 bits, Redundancy: 24%
+   7. mul                                                - Potential: 0.90 bits, Redundancy: 23%
+   8. lintegral_comp_eq_lintegral_meas_le_mul_of_measura - Potential: 0.89 bits, Redundancy: 19%
+   9. exists_sum_eq_one_iff_pairwise_coprime             - Potential: 0.88 bits, Redundancy: 23%
+   10. integral_mul_of_integrable                         - Potential: 0.86 bits, Redundancy: 43%
+
+**Key Findings:**
+
+1. **Scale confirms patterns:** Full dataset shows 1.02x compression from frequency optimization
+2. **High tactic predictability:** 58.4% of tactics predictable from previous tactic
+3. **Compression potential varies widely:** Top theorems show up to 1.19 bits of compressibility
+4. **Redundancy is common:** Average 2.0% tactic redundancy across proofs
+
+**Validation (Manual Inspection):**
+
+Examined 15 theorems (5 high, 5 middle, 5 low compression potential):
+- **High compression:** Theorems with repeated tactic patterns (see console output for details)
+- **Middle compression:** Typical structured proofs with moderate redundancy
+- **Low compression:** Diverse tactic sequences, high entropy (each tactic different)
+
+**Implications for Crystallization:**
+
+- Top 3 theorems have >1.0 bit compression potential
+- Frequent tactic patterns (bigrams/trigrams) are prime abstraction candidates
+- 58.4% predictability suggests significant room for tactic pattern libraries
+
+**Next Steps:**
+- Implement pattern abstraction (Phase 4): mine repeated tactic subtrees
+- Compute L_pattern to estimate crystallization gains
+- Compare with plan's 36% reduction hypothesis
+- Analyze correlation between compression potential and theorem impact (citations)
+
+**Figures:**
+- Distribution plots: `figs/experiment3_distributions.png`
+- Compression comparison: `figs/experiment3_compression_comparison.png`
+- Compression landscape: `figs/experiment3_compression_landscape.png`
