@@ -4,7 +4,7 @@ Build proof DAGs from traced_theorems_unified_v2.jsonl.
 Each proof is a sequence of tactic steps that transform proof states.
 This visualizes the proof trajectory: state → tactic → new_state → ... → "no goals"
 
-Inspired by 0_prooftrees.py but uses the unified v2 data format.
+Uses brutalist black-and-white aesthetic with hierarchical left-to-right layout.
 """
 
 import json
@@ -83,10 +83,14 @@ def build_proof_dag(theorem):
         node_id = f"s{state_hash}"
         state_id_map[state_str] = node_id
 
+        # Truncate goal for display
+        goal_str = context.get("goal", "")[:200]
+
         nodes[node_id] = {
             "id": node_id,
-            "state": state_str[:500],  # Truncate for JSON size
-            "goal": context.get("goal", "")[:300],  # Truncate goal too
+            "label": f"#{tactic_idx}",  # Simple label
+            "state": state_str[:300],  # Truncate for JSON size
+            "goal": goal_str,
             "num_hypotheses": len(context.get("hypotheses", {})),
             "num_variables": len(context.get("variables", {})),
             "is_initial": is_initial,
@@ -118,7 +122,7 @@ def build_proof_dag(theorem):
         state_after_id = get_or_create_state_node(
             state_after,
             after_context,
-            i,
+            i + 1,
             is_initial=False,
             is_terminal=is_terminal
         )
@@ -127,9 +131,9 @@ def build_proof_dag(theorem):
         edge = {
             "from": state_before_id,
             "to": state_after_id,
-            "tactic": tactic_str[:200],  # Truncate tactic for JSON size
+            "tactic": tactic_str[:100],  # Truncate tactic for display
             "tactic_index": i,
-            "premises": [p.get("full_name", "")[:100] for p in premises[:5]],  # Limit premises
+            "premises": [p.get("full_name", "")[:80] for p in premises[:5]],  # Limit premises
             "num_goals_before": tactic_record.get("num_goals_before", 0),
             "num_goals_after": tactic_record.get("num_goals_after", 0)
         }
@@ -142,9 +146,9 @@ def build_proof_dag(theorem):
     }
 
 
-def select_interesting_theorems(theorems, count=20):
+def select_interesting_theorems(theorems, count=48):
     """
-    Select interesting theorems for visualization.
+    Select interesting theorems for visualization (3 pages of 4x4 = 48 theorems).
 
     Prioritize:
     - Medium length (5-30 tactics) for readability
@@ -185,378 +189,335 @@ def generate_html(theorems_with_dags, output_path):
     """
     Generate interactive HTML visualization of proof DAGs.
 
-    Uses D3.js for force-directed graph layout.
+    Uses vis-network with hierarchical left-to-right layout.
+    Brutalist black-and-white aesthetic with 4x4 grid and paging.
     """
-    html_template = """<!DOCTYPE html>
+
+    # Prepare data for JSON embedding
+    all_networks_data = []
+    for thm, dag in theorems_with_dags:
+        # Prepare nodes for vis-network (black and white only)
+        vis_nodes = []
+        for node_id, node_info in dag["nodes"].items():
+            node = {
+                'id': node_id,
+                'label': node_info.get("label", node_id[:6]),
+                'title': node_info.get("goal", "")  # Tooltip on hover
+            }
+
+            # Black and white only - use border width to distinguish
+            if node_info.get('is_initial'):
+                node['color'] = {'background': '#FFFFFF', 'border': '#000000'}
+                node['borderWidth'] = 4
+            elif node_info.get('is_terminal'):
+                node['color'] = {'background': '#000000', 'border': '#000000'}
+                node['font'] = {'color': '#FFFFFF'}
+                node['borderWidth'] = 4
+            else:
+                node['color'] = {'background': '#FFFFFF', 'border': '#000000'}
+                node['borderWidth'] = 2
+
+            vis_nodes.append(node)
+
+        # Prepare edges for vis-network
+        vis_edges = []
+        for edge in dag["edges"]:
+            edge_data = {
+                'from': edge.get('from'),
+                'to': edge.get('to'),
+                'label': edge.get('tactic', '')[:10],  # Short label
+                'title': edge.get('tactic', ''),  # Full tactic on hover
+                'arrows': 'to',
+                'color': {'color': '#000000'},
+                'width': 2
+            }
+            vis_edges.append(edge_data)
+
+        theorem_name = thm.get("full_name", "Unknown")
+        short_name = theorem_name.split('.')[-1] if '.' in theorem_name else theorem_name
+
+        all_networks_data.append({
+            'theorem_name': theorem_name,
+            'short_name': short_name,
+            'nodes': vis_nodes,
+            'edges': vis_edges,
+            'node_count': len(dag["nodes"]),
+            'edge_count': dag["num_tactics"],
+            'num_premises': thm.get("metrics", {}).get("num_premises", 0)
+        })
+
+    # Create HTML content
+    total_theorems = len(all_networks_data)
+    total_pages = (total_theorems + 15) // 16  # Ceiling division for 4x4 grid
+
+    # Create grid HTML structure (16 placeholders for 4x4 grid)
+    grid_html = []
+    for idx in range(16):
+        grid_html.append(f'''
+        <div class="grid-item" id="grid-item-{idx}">
+            <div class="grid-label" id="label-{idx}"></div>
+            <div class="grid-network" id="network-{idx}"></div>
+        </div>''')
+
+    # Prepare all data as JSON for JavaScript
+    all_data_json = json.dumps(all_networks_data, ensure_ascii=False)
+    all_data_json_js = all_data_json.replace('</script>', '<\\/script>')
+
+    html_content = f"""<!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8">
-    <title>Proof DAGs - Within-Proof Trajectories</title>
-    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <meta charset="UTF-8">
+    <title>Proof DAGs - Within-Proof State Trajectories</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style>
-        body {{
-            font-family: 'Courier New', monospace;
+        * {{
             margin: 0;
-            padding: 20px;
-            background: #f5f5f5;
+            padding: 0;
+            box-sizing: border-box;
         }}
-
-        h1 {{
-            text-align: center;
-            margin-bottom: 10px;
+        body {{
+            font-family: 'Courier New', 'Liberation Mono', 'DejaVu Sans Mono', monospace;
+            background-color: #FFFFFF;
+            padding: 0;
+            margin: 0;
+            overflow: hidden;
         }}
-
-        .subtitle {{
-            text-align: center;
-            color: #666;
-            margin-bottom: 30px;
-        }}
-
-        .grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
-            gap: 20px;
-            margin: 0 auto;
-            max-width: 2200px;
-        }}
-
-        .proof-card {{
-            background: white;
-            border: 2px solid #333;
-            padding: 10px;
-        }}
-
-        .proof-header {{
-            font-weight: bold;
-            margin-bottom: 10px;
-            padding: 5px;
-            background: #eee;
-            border-left: 4px solid #333;
-            font-size: 12px;
-            word-break: break-all;
-        }}
-
-        .proof-stats {{
-            font-size: 11px;
-            color: #666;
-            margin-bottom: 10px;
-        }}
-
-        .proof-svg {{
-            border: 1px solid #ddd;
-        }}
-
-        .node {{
-            cursor: pointer;
-        }}
-
-        .node.initial {{
-            stroke: #2ecc71;
-            stroke-width: 3px;
-        }}
-
-        .node.terminal {{
-            stroke: #e74c3c;
-            stroke-width: 3px;
-        }}
-
-        .link {{
-            stroke: #999;
-            stroke-opacity: 0.6;
-            stroke-width: 2px;
-            fill: none;
-        }}
-
-        .link-label {{
-            font-size: 9px;
-            fill: #333;
-            pointer-events: none;
-        }}
-
-        .node-label {{
-            font-size: 10px;
-            pointer-events: none;
-            text-anchor: middle;
-        }}
-
-        .tooltip {{
+        .nav-bar {{
             position: fixed;
-            background: white;
-            border: 2px solid #333;
-            padding: 10px;
-            font-size: 11px;
-            max-width: 600px;
-            max-height: 400px;
-            overflow-y: auto;
-            pointer-events: none;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 50px;
+            background-color: #000000;
+            color: #FFFFFF;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
             z-index: 1000;
-            display: none;
+            border-bottom: 4px solid #000000;
         }}
-
-        .tooltip-title {{
+        .legend-box {{
+            position: fixed;
+            top: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #FFFFFF;
+            border: 3px solid #000000;
+            border-top: none;
+            padding: 6px 12px;
+            font-size: 9px;
+            line-height: 1.2;
+            z-index: 999;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            white-space: nowrap;
+        }}
+        .legend-title {{
             font-weight: bold;
-            margin-bottom: 5px;
-            border-bottom: 1px solid #ddd;
-            padding-bottom: 5px;
+            margin-right: 4px;
         }}
-
-        .tooltip-section {{
-            margin-top: 5px;
+        .legend-item {{
+            margin: 0;
         }}
-
-        .tooltip-label {{
+        .nav-button {{
+            background-color: #FFFFFF;
+            color: #000000;
+            border: 2px solid #000000;
+            padding: 8px 20px;
+            font-family: inherit;
+            font-size: 12px;
+            cursor: pointer;
             font-weight: bold;
-            color: #666;
         }}
-
-        .goal {{
-            background: #fffacd;
-            padding: 3px;
-            margin-top: 3px;
-            font-family: 'Courier New', monospace;
-            font-size: 10px;
+        .nav-button:hover {{
+            background-color: #000000;
+            color: #FFFFFF;
         }}
-
-        .tactic {{
-            background: #e8f4f8;
-            padding: 3px;
-            margin-top: 3px;
-            font-family: 'Courier New', monospace;
-            font-size: 10px;
+        .nav-button:disabled {{
+            background-color: #CCCCCC;
+            color: #666666;
+            cursor: not-allowed;
+        }}
+        .page-info {{
+            font-size: 11px;
+            font-weight: bold;
+        }}
+        .grid-container {{
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(4, 1fr);
+            width: 100vw;
+            height: calc(100vh - 80px);
+            margin-top: 80px;
+            gap: 0;
+        }}
+        .grid-item {{
+            border: 4px solid #000000;
+            background-color: #FFFFFF;
+            overflow: hidden;
+            position: relative;
+        }}
+        .grid-label {{
+            position: absolute;
+            top: 0;
+            left: 0;
+            background-color: #FFFFFF;
+            color: #000000;
+            padding: 3px 5px;
+            font-size: 8px;
+            font-weight: bold;
+            z-index: 10;
+            border-right: 2px solid #000000;
+            border-bottom: 2px solid #000000;
+            max-width: calc(100% - 10px);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            line-height: 1.1;
+        }}
+        .grid-network {{
+            width: 100%;
+            height: 100%;
         }}
     </style>
 </head>
 <body>
-    <h1>Proof DAGs: Within-Proof State Trajectories</h1>
-    <div class="subtitle">
-        Each graph shows how tactics transform proof states until "no goals" is reached.
-        <br>Green = initial state | Red = terminal state (proof complete)
+    <div class="nav-bar">
+        <button class="nav-button" id="prev-btn" onclick="changePage(-1)">◀ PREV</button>
+        <div class="page-info" id="page-info">Page 1 / {total_pages}</div>
+        <button class="nav-button" id="next-btn" onclick="changePage(1)">NEXT ▶</button>
     </div>
+    <div class="legend-box">
+        <span class="legend-title">PROOF DAGs:</span>
+        <span class="legend-item">Each graph = tactic sequence within ONE proof</span>
+        <span class="legend-item">|</span>
+        <span class="legend-item">White border (thick) = initial state</span>
+        <span class="legend-item">|</span>
+        <span class="legend-item">Black fill = terminal (proof complete)</span>
+        <span class="legend-item">|</span>
+        <span class="legend-item">N=states, E=tactics, P=premises</span>
+    </div>
+    <div class="grid-container">
+        {''.join(grid_html)}
+    </div>
+    <script type="text/javascript">
+        // Store all theorem data
+        const allTheoremsData = {all_data_json_js};
+        const theoremsPerPage = 16;
+        let currentPage = 0;
+        const totalPages = {total_pages};
+        const networks = [];
 
-    <div class="grid" id="proof-grid"></div>
-    <div class="tooltip" id="tooltip"></div>
+        // Initialize networks array
+        for (let i = 0; i < 16; i++) {{
+            networks.push(null);
+        }}
 
-    <script>
-        const proofsData = {proofs_json};
+        function renderPage(page) {{
+            const startIdx = page * theoremsPerPage;
+            const endIdx = Math.min(startIdx + theoremsPerPage, allTheoremsData.length);
 
-        // Create visualization for each proof
-        proofsData.forEach((proof, idx) => {{
-            createProofGraph(proof, idx);
-        }});
+            // Clear all grids
+            for (let i = 0; i < 16; i++) {{
+                const labelEl = document.getElementById('label-' + i);
+                const networkEl = document.getElementById('network-' + i);
 
-        function createProofGraph(proof, idx) {{
-            const card = d3.select("#proof-grid")
-                .append("div")
-                .attr("class", "proof-card");
-
-            // Header
-            card.append("div")
-                .attr("class", "proof-header")
-                .text(proof.theorem_name);
-
-            // Stats
-            card.append("div")
-                .attr("class", "proof-stats")
-                .html(`
-                    Tactics: ${{proof.num_tactics}} |
-                    Premises: ${{proof.num_premises}} |
-                    States: ${{Object.keys(proof.dag.nodes).length}}
-                `);
-
-            // SVG canvas
-            const width = 480;
-            const height = 400;
-
-            const svg = card.append("svg")
-                .attr("class", "proof-svg")
-                .attr("width", width)
-                .attr("height", height);
-
-            // Prepare data for D3
-            const nodes = Object.values(proof.dag.nodes).map(n => ({{
-                ...n,
-                x: Math.random() * width,
-                y: Math.random() * height
-            }}));
-
-            const links = proof.dag.edges.map(e => ({{
-                source: e.from,
-                target: e.to,
-                tactic: e.tactic,
-                premises: e.premises,
-                num_goals_before: e.num_goals_before,
-                num_goals_after: e.num_goals_after
-            }}));
-
-            // Force simulation with left-to-right bias for sequential proofs
-            const simulation = d3.forceSimulation(nodes)
-                .force("link", d3.forceLink(links).id(d => d.id).distance(100))
-                .force("charge", d3.forceManyBody().strength(-400))
-                .force("center", d3.forceCenter(width / 2, height / 2))
-                .force("collision", d3.forceCollide().radius(25))
-                .force("x", d3.forceX().x(d => {{
-                    // Position based on tactic index (left to right)
-                    return 50 + (d.tactic_index / proof.num_tactics) * (width - 100);
-                }}).strength(0.5));
-
-            // Draw links
-            const link = svg.append("g")
-                .selectAll("line")
-                .data(links)
-                .join("line")
-                .attr("class", "link")
-                .attr("marker-end", "url(#arrowhead)");
-
-            // Add arrowhead marker
-            svg.append("defs").append("marker")
-                .attr("id", "arrowhead")
-                .attr("viewBox", "0 -5 10 10")
-                .attr("refX", 20)
-                .attr("refY", 0)
-                .attr("markerWidth", 6)
-                .attr("markerHeight", 6)
-                .attr("orient", "auto")
-                .append("path")
-                .attr("d", "M0,-5L10,0L0,5")
-                .attr("fill", "#999");
-
-            // Draw nodes
-            const node = svg.append("g")
-                .selectAll("circle")
-                .data(nodes)
-                .join("circle")
-                .attr("class", d => {{
-                    let cls = "node";
-                    if (d.is_initial) cls += " initial";
-                    if (d.is_terminal) cls += " terminal";
-                    return cls;
-                }})
-                .attr("r", 10)
-                .attr("fill", d => d.is_terminal ? "#e74c3c" : (d.is_initial ? "#2ecc71" : "#3498db"))
-                .call(drag(simulation))
-                .on("mouseover", showTooltip)
-                .on("mouseout", hideTooltip);
-
-            // Node labels (state number based on position)
-            const nodeLabel = svg.append("g")
-                .selectAll("text")
-                .data(nodes)
-                .join("text")
-                .attr("class", "node-label")
-                .text((d, i) => i)  // Use sequential index instead of tactic index
-                .attr("dy", 4);
-
-            // Update positions on simulation tick
-            simulation.on("tick", () => {{
-                link
-                    .attr("x1", d => d.source.x)
-                    .attr("y1", d => d.source.y)
-                    .attr("x2", d => d.target.x)
-                    .attr("y2", d => d.target.y);
-
-                node
-                    .attr("cx", d => d.x)
-                    .attr("cy", d => d.y);
-
-                nodeLabel
-                    .attr("x", d => d.x)
-                    .attr("y", d => d.y);
-            }});
-
-            function showTooltip(event, d) {{
-                const tooltip = d3.select("#tooltip");
-
-                // Find the edge that starts from this node
-                const outEdge = links.find(e => e.source.id === d.id || e.source === d.id);
-
-                let html = `<div class="tooltip-title">State ${{d.tactic_index}}</div>`;
-
-                if (d.goal) {{
-                    html += `<div class="tooltip-section">
-                        <span class="tooltip-label">Goal:</span>
-                        <div class="goal">${{d.goal.substring(0, 200)}}${{d.goal.length > 200 ? '...' : ''}}</div>
-                    </div>`;
+                if (networkEl) {{
+                    networkEl.innerHTML = '';
                 }}
 
-                html += `<div class="tooltip-section">
-                    <span class="tooltip-label">Context:</span>
-                    ${{d.num_hypotheses}} hypotheses, ${{d.num_variables}} variables
-                </div>`;
+                if (labelEl) {{
+                    labelEl.textContent = '';
+                }}
 
-                if (outEdge) {{
-                    html += `<div class="tooltip-section">
-                        <span class="tooltip-label">Next Tactic:</span>
-                        <div class="tactic">${{outEdge.tactic.substring(0, 200)}}${{outEdge.tactic.length > 200 ? '...' : ''}}</div>
-                    </div>`;
+                // Destroy existing network
+                if (networks[i]) {{
+                    networks[i].destroy();
+                    networks[i] = null;
+                }}
+            }}
 
-                    if (outEdge.premises && outEdge.premises.length > 0) {{
-                        html += `<div class="tooltip-section">
-                            <span class="tooltip-label">Premises used:</span> ${{outEdge.premises.slice(0, 3).join(", ")}}
-                            ${{outEdge.premises.length > 3 ? `... (+${{outEdge.premises.length - 3}} more)` : ''}}
-                        </div>`;
+            // Render visible theorems
+            for (let i = 0; i < endIdx - startIdx; i++) {{
+                const theoremIdx = startIdx + i;
+                const theoremData = allTheoremsData[theoremIdx];
+
+                if (!theoremData) continue;
+
+                const labelEl = document.getElementById('label-' + i);
+                const networkEl = document.getElementById('network-' + i);
+
+                if (!labelEl || !networkEl) continue;
+
+                // Set label with theorem name and stats
+                const stats = 'N' + theoremData.node_count + ' E' + theoremData.edge_count + ' P' + theoremData.num_premises;
+                labelEl.textContent = theoremData.short_name + ' | ' + stats;
+
+                // Create network with hierarchical layout (left-to-right)
+                const nodes = new vis.DataSet(theoremData.nodes);
+                const edges = new vis.DataSet(theoremData.edges);
+                const data = {{ nodes: nodes, edges: edges }};
+                const options = {{
+                    nodes: {{
+                        shape: 'box',
+                        font: {{ size: 10, face: 'monospace', color: '#000000' }},
+                        margin: 5,
+                        widthConstraint: {{ maximum: 60 }},
+                        heightConstraint: {{ maximum: 30 }}
+                    }},
+                    edges: {{
+                        font: {{ size: 7, align: 'top', color: '#000000' }},
+                        smooth: {{ type: 'cubicBezier' }},
+                        arrows: {{ to: {{ enabled: true, scaleFactor: 0.6 }} }},
+                        width: 2
+                    }},
+                    layout: {{
+                        hierarchical: {{
+                            enabled: true,
+                            direction: 'LR',
+                            sortMethod: 'directed',
+                            levelSeparation: 80,
+                            nodeSpacing: 60,
+                            treeSpacing: 80
+                        }}
+                    }},
+                    physics: {{
+                        enabled: false
+                    }},
+                    interaction: {{
+                        dragNodes: true,
+                        dragView: true,
+                        zoomView: true,
+                        hover: true
                     }}
-                }}
+                }};
 
-                if (d.is_terminal) {{
-                    html += `<div class="tooltip-section" style="color: #e74c3c; font-weight: bold;">
-                        ✓ Proof complete (no goals)
-                    </div>`;
-                }}
-
-                tooltip
-                    .html(html)
-                    .style("display", "block")
-                    .style("left", (event.pageX + 10) + "px")
-                    .style("top", (event.pageY + 10) + "px");
+                networks[i] = new vis.Network(networkEl, data, options);
             }}
 
-            function hideTooltip() {{
-                d3.select("#tooltip").style("display", "none");
+            // Update page info
+            document.getElementById('page-info').textContent = 'Page ' + (page + 1) + ' / ' + totalPages;
+
+            // Update button states
+            document.getElementById('prev-btn').disabled = (page === 0);
+            document.getElementById('next-btn').disabled = (page === totalPages - 1);
+        }}
+
+        function changePage(delta) {{
+            const newPage = currentPage + delta;
+            if (newPage >= 0 && newPage < totalPages) {{
+                currentPage = newPage;
+                renderPage(currentPage);
             }}
         }}
 
-        function drag(simulation) {{
-            function dragstarted(event) {{
-                if (!event.active) simulation.alphaTarget(0.3).restart();
-                event.subject.fx = event.subject.x;
-                event.subject.fy = event.subject.y;
-            }}
-
-            function dragged(event) {{
-                event.subject.fx = event.x;
-                event.subject.fy = event.y;
-            }}
-
-            function dragended(event) {{
-                if (!event.active) simulation.alphaTarget(0);
-                event.subject.fx = null;
-                event.subject.fy = null;
-            }}
-
-            return d3.drag()
-                .on("start", dragstarted)
-                .on("drag", dragged)
-                .on("end", dragended);
-        }}
+        // Initial render
+        renderPage(0);
     </script>
 </body>
 </html>"""
-
-    # Prepare data for JSON embedding
-    proofs_for_json = []
-    for thm, dag in theorems_with_dags:
-        proof_data = {
-            "theorem_name": thm.get("full_name", "Unknown"),
-            "num_tactics": dag["num_tactics"],
-            "num_premises": thm.get("metrics", {}).get("num_premises", 0),
-            "dag": dag
-        }
-        proofs_for_json.append(proof_data)
-
-    # Generate HTML
-    html_content = html_template.format(
-        proofs_json=json.dumps(proofs_for_json, ensure_ascii=False)
-    )
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html_content)
@@ -571,14 +532,14 @@ def main():
     print("="*70)
 
     # Load theorems
-    theorems = load_theorems_with_proofs(DATA_FILE, max_theorems=1000)
+    theorems = load_theorems_with_proofs(DATA_FILE, max_theorems=2000)
 
     if not theorems:
         print("No theorems with tactic proofs found!")
         return
 
-    # Select interesting subset
-    selected = select_interesting_theorems(theorems, count=20)
+    # Select interesting subset (3 pages of 4x4 = 48 theorems)
+    selected = select_interesting_theorems(theorems, count=48)
 
     # Build DAGs
     print(f"\nBuilding proof DAGs...")
@@ -600,6 +561,7 @@ def main():
     print(f"\n{'='*70}")
     print("DONE!")
     print(f"Open {OUTPUT_HTML} in your browser to view the proof DAGs.")
+    print(f"4x4 grid with page navigation | Black & white brutalist design")
     print("="*70)
 
 
