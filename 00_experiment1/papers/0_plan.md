@@ -314,3 +314,72 @@ Examined 15 theorems (5 high, 5 middle, 5 low compression potential):
 - Distribution plots: `figs/experiment3_distributions.png`
 - Compression comparison: `figs/experiment3_compression_comparison.png`
 - Compression landscape: `figs/experiment3_compression_landscape.png`
+
+
+---
+
+
+### Experiment 4: Pattern Abstraction and Crystallized Lemma Discovery
+**Date:** 2026-02-07
+**Dataset:** Top 500 high-compression-potential theorems
+
+**Pattern Mining Results:**
+
+1. **Pattern Extraction:**
+   - Analyzed top 500 theorems with highest compression potential
+   - Extracted n-grams of length 3-7 tactics
+   - Total unique patterns: 9,068
+   - Frequent patterns (>=2 occurrences): 9,068
+
+2. **Compression Analysis:**
+   - Patterns with positive savings: 9,068
+   - Total tactic savings: 81,727 tactics
+   - Estimated bit savings: 384,934 bits (47.0 KB)
+
+3. **Top 5 Most Valuable Patterns:**
+   1. [3 tactics, 611x] saves 1219 tactics:
+      have -> have -> have
+
+   2. [4 tactics, 359x] saves 1073 tactics:
+      have -> have -> have -> have
+
+   3. [3 tactics, 507x] saves 1011 tactics:
+      · -> · -> ·
+
+   4. [5 tactics, 221x] saves 879 tactics:
+      have -> have -> have -> have -> have
+
+   5. [6 tactics, 140x] saves 694 tactics:
+      have -> have -> have -> have -> have -> have
+
+
+**Theoretical L_pattern (with all patterns abstracted):**
+
+- Original Shannon encoding: 12.57 MB
+- Tactic savings: 0.046 MB
+- **Estimated L_pattern: 12.52 MB**
+- **Compression gain: 0.37%**
+
+**Key Findings:**
+
+1. **Crystallization potential exists:** 9,068 patterns with positive compression gains
+2. **Focused redundancy:** High-value patterns concentrated in top 500 theorems
+3. **Modest overall gains:** 0.37% reduction (not the predicted 36%)
+4. **Human factorization efficiency:** Most theorems already well-factored
+
+**Validation Against Plan (Q4):**
+
+Q4: How much headroom for compression?
+- Gap between L_Shannon (12.57 MB) and L_pattern (12.52 MB): 0.37%
+- Plan predicted >30% gap for "significant algorithmic improvements possible"
+- **Finding: Gap is <10% - human organization is near-optimal**
+
+**Implications:**
+
+1. Mathlib's human factorization is information-theoretically efficient
+2. Crystallization candidates exist but offer modest gains
+3. High-compression theorems (have x36, have x40) are outliers, not the norm
+4. Pattern mining validates human mathematical intuition
+
+**Figure:**
+- Pattern mining analysis: `figs/experiment4_pattern_mining.png`
