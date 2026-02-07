@@ -54,15 +54,47 @@ def build_proof_dag(theorem):
     Build a DAG structure for a single proof.
 
     The proof is sequential: tactics[i].state_after ≈ tactics[i+1].state_before
+    We reuse state nodes when they match to create a proper linear chain.
 
     Returns:
         dict with nodes and edges representing the proof trajectory
     """
     tactics = theorem.get("tactics", [])
 
-    # Build nodes (proof states)
+    # Build nodes (proof states) - use hash of state string as ID to reuse matching states
     nodes = {}
     edges = []
+    state_id_map = {}  # Map state string to node ID
+
+    def get_or_create_state_node(state_str, context, tactic_idx, is_initial, is_terminal):
+        """Get existing node ID for state, or create new one."""
+        # Use hash of state string as stable ID (truncate for readability)
+        state_hash = str(abs(hash(state_str)))[:8]
+
+        if state_str in state_id_map:
+            # State already exists - reuse it
+            node_id = state_id_map[state_str]
+            # Update terminal status if needed
+            if is_terminal:
+                nodes[node_id]["is_terminal"] = True
+            return node_id
+
+        # Create new node
+        node_id = f"s{state_hash}"
+        state_id_map[state_str] = node_id
+
+        nodes[node_id] = {
+            "id": node_id,
+            "state": state_str[:500],  # Truncate for JSON size
+            "goal": context.get("goal", "")[:300],  # Truncate goal too
+            "num_hypotheses": len(context.get("hypotheses", {})),
+            "num_variables": len(context.get("variables", {})),
+            "is_initial": is_initial,
+            "is_terminal": is_terminal,
+            "tactic_index": tactic_idx
+        }
+
+        return node_id
 
     for i, tactic_record in enumerate(tactics):
         state_before = tactic_record.get("state_before", "")
@@ -72,40 +104,32 @@ def build_proof_dag(theorem):
         context = tactic_record.get("context", {})
         is_terminal = tactic_record.get("is_terminal", False)
 
-        # Use truncated state as node ID (full state can be very long)
-        state_before_id = f"state_{i}_before"
-        state_after_id = f"state_{i}_after"
+        # Get or create state nodes
+        state_before_id = get_or_create_state_node(
+            state_before,
+            context,
+            i,
+            is_initial=(i == 0),
+            is_terminal=False
+        )
 
-        # Add nodes if not already present
-        if state_before_id not in nodes:
-            nodes[state_before_id] = {
-                "id": state_before_id,
-                "state": state_before,
-                "goal": context.get("goal", ""),
-                "num_hypotheses": len(context.get("hypotheses", {})),
-                "num_variables": len(context.get("variables", {})),
-                "is_initial": i == 0,
-                "is_terminal": False,
-                "tactic_index": i
-            }
-
-        if state_after_id not in nodes:
-            nodes[state_after_id] = {
-                "id": state_after_id,
-                "state": state_after,
-                "goal": "",  # State after doesn't have parsed context
-                "is_initial": False,
-                "is_terminal": is_terminal,
-                "tactic_index": i
-            }
+        # Parse context for state_after (approximation - we don't have full context)
+        after_context = {"goal": "", "hypotheses": {}, "variables": {}}
+        state_after_id = get_or_create_state_node(
+            state_after,
+            after_context,
+            i,
+            is_initial=False,
+            is_terminal=is_terminal
+        )
 
         # Add edge (tactic step)
         edge = {
             "from": state_before_id,
             "to": state_after_id,
-            "tactic": tactic_str,
+            "tactic": tactic_str[:200],  # Truncate tactic for JSON size
             "tactic_index": i,
-            "premises": [p.get("full_name", "") for p in premises],
+            "premises": [p.get("full_name", "")[:100] for p in premises[:5]],  # Limit premises
             "num_goals_before": tactic_record.get("num_goals_before", 0),
             "num_goals_after": tactic_record.get("num_goals_after", 0)
         }
@@ -364,12 +388,16 @@ def generate_html(theorems_with_dags, output_path):
                 num_goals_after: e.num_goals_after
             }}));
 
-            // Force simulation
+            // Force simulation with left-to-right bias for sequential proofs
             const simulation = d3.forceSimulation(nodes)
-                .force("link", d3.forceLink(links).id(d => d.id).distance(80))
-                .force("charge", d3.forceManyBody().strength(-300))
+                .force("link", d3.forceLink(links).id(d => d.id).distance(100))
+                .force("charge", d3.forceManyBody().strength(-400))
                 .force("center", d3.forceCenter(width / 2, height / 2))
-                .force("collision", d3.forceCollide().radius(20));
+                .force("collision", d3.forceCollide().radius(25))
+                .force("x", d3.forceX().x(d => {{
+                    // Position based on tactic index (left to right)
+                    return 50 + (d.tactic_index / proof.num_tactics) * (width - 100);
+                }}).strength(0.5));
 
             // Draw links
             const link = svg.append("g")
@@ -409,13 +437,13 @@ def generate_html(theorems_with_dags, output_path):
                 .on("mouseover", showTooltip)
                 .on("mouseout", hideTooltip);
 
-            // Node labels (tactic index)
+            // Node labels (state number based on position)
             const nodeLabel = svg.append("g")
                 .selectAll("text")
                 .data(nodes)
                 .join("text")
                 .attr("class", "node-label")
-                .text(d => d.tactic_index)
+                .text((d, i) => i)  // Use sequential index instead of tactic index
                 .attr("dy", 4);
 
             // Update positions on simulation tick
@@ -558,6 +586,10 @@ def main():
     for thm in selected:
         dag = build_proof_dag(thm)
         theorems_with_dags.append((thm, dag))
+
+        # Diagnostic: show first few
+        if len(theorems_with_dags) <= 3:
+            print(f"  {thm['full_name'][:50]}: {dag['num_tactics']} tactics -> {len(dag['nodes'])} states")
 
     print(f"  Built {len(theorems_with_dags)} proof DAGs")
 
