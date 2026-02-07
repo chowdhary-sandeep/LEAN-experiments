@@ -241,7 +241,7 @@ def generate_html(theorems_with_dags, output_path):
             node = {
                 'id': node_id,
                 'label': node_info.get("label", node_id[:6]),
-                'title': tooltip_text,  # Plain text for default tooltip (will be overridden by custom)
+                # Don't set 'title' - we use custom tooltips only
                 'tooltip_html': tooltip_text  # Store for custom HTML tooltip
             }
 
@@ -426,13 +426,13 @@ def generate_html(theorems_with_dags, output_path):
             background-color: #FFFFFF;
             border: 2px solid #000000;
             padding: 4px 6px;
-            font-size: 8px;
-            line-height: 1.2;
+            font-size: 7px;
+            line-height: 1.1;
             font-family: 'Courier New', monospace;
             z-index: 10000;
             pointer-events: none;
             display: none;
-            max-width: 300px;
+            max-width: 280px;
             white-space: pre-wrap;
             word-break: break-word;
         }}
@@ -560,12 +560,18 @@ def generate_html(theorems_with_dags, output_path):
                         const tooltip = document.getElementById('custom-tooltip');
                         tooltip.textContent = nodeData.tooltip_html;
                         tooltip.style.display = 'block';
-                        tooltip.style.left = params.event.center.x + 15 + 'px';
-                        tooltip.style.top = params.event.center.y + 15 + 'px';
+                        // Use DOM event coordinates for proper positioning
+                        tooltip.style.left = (params.event.pageX + 10) + 'px';
+                        tooltip.style.top = (params.event.pageY + 10) + 'px';
                     }}
                 }});
 
                 networks[i].on("blurNode", function(params) {{
+                    document.getElementById('custom-tooltip').style.display = 'none';
+                }});
+
+                // Also hide tooltip on mouse leave
+                networkEl.addEventListener('mouseleave', function() {{
                     document.getElementById('custom-tooltip').style.display = 'none';
                 }});
             }}
