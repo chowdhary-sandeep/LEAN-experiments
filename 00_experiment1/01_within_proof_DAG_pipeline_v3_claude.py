@@ -65,8 +65,9 @@ def build_proof_dag(theorem):
     nodes = {}
     edges = []
     state_id_map = {}  # Map state string to node ID
+    state_counter = [0]  # Counter for sequential state numbering (use list for mutability in closure)
 
-    def get_or_create_state_node(state_str, context, tactic_idx, is_initial, is_terminal):
+    def get_or_create_state_node(state_str, context, is_initial, is_terminal):
         """Get existing node ID for state, or create new one."""
         # Use hash of state string as stable ID (truncate for readability)
         state_hash = str(abs(hash(state_str)))[:8]
@@ -79,23 +80,35 @@ def build_proof_dag(theorem):
                 nodes[node_id]["is_terminal"] = True
             return node_id
 
-        # Create new node
+        # Create new node with sequential numbering
         node_id = f"s{state_hash}"
         state_id_map[state_str] = node_id
+        state_num = state_counter[0]
+        state_counter[0] += 1
 
         # Truncate goal for display
         goal_str = context.get("goal", "")[:200]
 
+        # Count goals in state string
+        num_goals = state_str.count("⊢") if state_str else 0
+
+        # Create meaningful label: state number + goal count
+        if num_goals > 0:
+            label = f"s{state_num}\n({num_goals}g)"
+        else:
+            label = f"s{state_num}"
+
         nodes[node_id] = {
             "id": node_id,
-            "label": f"#{tactic_idx}",  # Simple label
+            "label": label,
             "state": state_str[:300],  # Truncate for JSON size
             "goal": goal_str,
+            "num_goals": num_goals,
             "num_hypotheses": len(context.get("hypotheses", {})),
             "num_variables": len(context.get("variables", {})),
             "is_initial": is_initial,
             "is_terminal": is_terminal,
-            "tactic_index": tactic_idx
+            "state_number": state_num
         }
 
         return node_id
@@ -112,7 +125,6 @@ def build_proof_dag(theorem):
         state_before_id = get_or_create_state_node(
             state_before,
             context,
-            i,
             is_initial=(i == 0),
             is_terminal=False
         )
@@ -122,7 +134,6 @@ def build_proof_dag(theorem):
         state_after_id = get_or_create_state_node(
             state_after,
             after_context,
-            i + 1,
             is_initial=False,
             is_terminal=is_terminal
         )
