@@ -337,38 +337,45 @@ print("\nCreating interactive HTML version...")
 
 fig_html = make_subplots(
     rows=2, cols=2,
-    subplot_titles=('MDL Gain Distribution', 'MDL Phase Diagram',
+    subplot_titles=('MDL Gain Distribution (5000 sample)', 'MDL Phase Diagram (5000 sample)',
                    'In-Degree Distribution', 'Top 100 Theorems by MDL'),
     specs=[[{'type': 'scatter'}, {'type': 'scatter'}],
            [{'type': 'histogram'}, {'type': 'bar'}]]
 )
 
-# 1. MDL distribution
+# Sample data for visualization (every 25th point to get ~5000 points)
+sample_step = max(1, len(df_sorted) // 5000)
+df_sorted_sample = df_sorted.iloc[::sample_step].reset_index(drop=True)
+
+# 1. MDL distribution - use actual rank as x-axis
 fig_html.add_trace(
     go.Scatter(
-        x=np.arange(len(df_sorted)),
-        y=df_sorted['mdl_gain'],
+        x=np.arange(0, len(df_sorted), sample_step),  # Actual rank positions
+        y=df_sorted_sample['mdl_gain'],
         mode='markers',
-        marker=dict(size=3, color=df_sorted['in_degree'], colorscale='Viridis',
-                   colorbar=dict(title="Citations")),
-        text=[f"{row['theorem']}<br>MDL: {row['mdl_gain']:.0f}<br>Uses: {row['in_degree']}"
-             for _, row in df_sorted.iterrows()],
+        marker=dict(size=5, color=df_sorted_sample['in_degree'], colorscale='Viridis',
+                   colorbar=dict(title="Citations", x=1.15)),
+        text=[f"{row['theorem']}<br>Rank: {i*sample_step}<br>MDL: {row['mdl_gain']:.0f}<br>Uses: {row['in_degree']}"
+             for i, (_, row) in enumerate(df_sorted_sample.iterrows())],
         hovertemplate='%{text}<extra></extra>',
         name='Theorems'
     ),
     row=1, col=1
 )
 
-# 2. Phase diagram
+# 2. Phase diagram - also sample
+sample_idx = np.random.choice(len(df_mdl), min(5000, len(df_mdl)), replace=False)
+df_mdl_sample = df_mdl.iloc[sample_idx]
+
 fig_html.add_trace(
     go.Scatter(
-        x=df_mdl['in_degree'],
-        y=df_mdl['pattern_length'],
+        x=df_mdl_sample['in_degree'] + 0.1,  # Add small offset to show 0 values on log scale
+        y=df_mdl_sample['pattern_length'],
         mode='markers',
-        marker=dict(size=5, color=df_mdl['mdl_gain'], colorscale='RdYlGn',
-                   colorbar=dict(title="MDL Gain")),
+        marker=dict(size=6, color=df_mdl_sample['mdl_gain'], colorscale='RdYlGn',
+                   colorbar=dict(title="MDL Gain", x=1.15)),
         text=[f"{row['theorem']}<br>MDL: {row['mdl_gain']:.0f}<br>Uses: {row['in_degree']}<br>Len: {row['pattern_length']}"
-             for _, row in df_mdl.iterrows()],
+             for _, row in df_mdl_sample.iterrows()],
         hovertemplate='%{text}<extra></extra>',
         name='Theorems'
     ),
