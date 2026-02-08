@@ -1,384 +1,519 @@
 """
-Create beautiful multi-panel figure for Search Proof Dynamics results.
+Discovery Dynamics — Dense Multi-Panel Figure (v2)
 
-Visualizes:
-1. Adjacent possible growth curves (BFS, Random, Greedy)
-2. Accessibility time distribution
-3. Dilution factor analysis
-4. Bottleneck identification
-5. Memory-constrained coverage
-6. Strategy comparison + interpretation
+Layout: 2 rows x 6 columns (12 panels, annotations inside plots)
+Row 1: Exploration dynamics + gateway analysis
+Row 2: Phase transitions + recall analysis
+
+Figure: ~72" wide x 12" tall, super dense
 """
 
 import json
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
-import matplotlib.patches as mpatches
+import matplotlib.lines as mlines
+import matplotlib.ticker as mticker
+import matplotlib.colors as mcolors
 from pathlib import Path
 
-# Configuration
+# -- Config ---------------------------------------------------------------------
 SCRIPT_DIR = Path(__file__).resolve().parent
 RESULTS_FILE = SCRIPT_DIR / "experiment2_search_proof_results.json"
+PHASE_FILE = SCRIPT_DIR / "experiment2_phase_transition_results.json"
 FIGS_DIR = SCRIPT_DIR / "figs"
 OUTPUT_PNG = FIGS_DIR / "experiment2_search_proof_comprehensive.png"
+OUTPUT_PDF = FIGS_DIR / "experiment2_search_proof_comprehensive.pdf"
 
 print("Loading results...")
 with open(RESULTS_FILE, 'r') as f:
     results = json.load(f)
 
+phase_data = None
+if PHASE_FILE.exists():
+    print("Loading phase transition results...")
+    with open(PHASE_FILE, 'r') as f:
+        phase_data = json.load(f)
+
 print("Creating comprehensive visualization...")
 
-# Create figure
-fig = plt.figure(figsize=(22, 16))
-gs = GridSpec(4, 3, figure=fig, hspace=0.35, wspace=0.3,
-              left=0.05, right=0.98, top=0.95, bottom=0.05)
+# -- Style ----------------------------------------------------------------------
+plt.rcParams.update({
+    'font.family': 'sans-serif',
+    'font.sans-serif': ['Arial', 'Helvetica', 'DejaVu Sans'],
+    'axes.linewidth': 0.7,
+    'axes.edgecolor': '#444444',
+    'grid.alpha': 0.08,
+    'grid.linewidth': 0.3,
+    'xtick.major.width': 0.5,
+    'ytick.major.width': 0.5,
+    'xtick.major.size': 3,
+    'ytick.major.size': 3,
+})
 
-# Title
-fig.suptitle('Mathematical Discovery Dynamics: The Adjacent Possible in Formal Theorem Proving',
-             fontsize=20, fontweight='bold', family='monospace')
+# Strategy colors
+SC = {'bfs': '#1a1a1a', 'dfs': '#2D8A6E', 'random': '#4A90D9', 'greedy': '#D94A4A'}
+SL = {'bfs': 'BFS', 'dfs': 'DFS', 'random': 'Random', 'greedy': 'Greedy'}
 
-# Color scheme
-colors = {
-    'bfs': '#2E7D32',      # Dark green
-    'random': '#1976D2',   # Blue
-    'greedy': '#D32F2F',   # Red
-    'bg': '#FFF3E0'        # Light orange
+# Budget linestyles
+BLS = {
+    '1000':  {'lw': 0.8, 'ls': (0, (1, 2)),      'label': '1k'},
+    '5000':  {'lw': 1.1, 'ls': (0, (4, 2)),       'label': '5k'},
+    '20000': {'lw': 1.5, 'ls': (0, (4, 1, 1, 1)), 'label': '20k'},
+    '60000': {'lw': 2.2, 'ls': '-',                'label': '60k'},
 }
 
-# Background box
-bg_box = mpatches.FancyBboxPatch((0.01, 0.01), 0.98, 0.93,
-                                 boxstyle="round,pad=0.01",
-                                 facecolor=colors['bg'],
-                                 edgecolor='black', linewidth=2, alpha=0.15,
-                                 transform=fig.transFigure, zorder=0)
-fig.patches.append(bg_box)
+ACCENT = '#C04040'
+BG_NOTE = dict(boxstyle='round,pad=0.25', facecolor='#FAFAFA', edgecolor='#DDD', alpha=0.92)
 
-# ============================================================================
-# ROW 1: ADJACENT POSSIBLE DYNAMICS
-# ============================================================================
 
-# Panel 1.1: Adjacent possible size over time
-ax1 = fig.add_subplot(gs[0, 0])
+def style_ax(ax, title, xlabel='', ylabel='', title_size=9.5):
+    ax.set_title(title, fontsize=title_size, fontweight='bold', pad=5, loc='left')
+    if xlabel:
+        ax.set_xlabel(xlabel, fontsize=7.5, labelpad=3)
+    if ylabel:
+        ax.set_ylabel(ylabel, fontsize=7.5, labelpad=3)
+    ax.tick_params(labelsize=6.5)
+    ax.grid(True, alpha=0.08, linewidth=0.3)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+
+def note(ax, x, y, text, fontsize=6.5, ha='left', va='top'):
+    """Place annotation text inside a plot."""
+    ax.text(x, y, text, transform=ax.transAxes, fontsize=fontsize,
+            family='monospace', color='#444', ha=ha, va=va, bbox=BG_NOTE,
+            linespacing=1.4)
+
+
+# -- Figure layout: 2 rows x 6 columns ----------------------------------------
+fig = plt.figure(figsize=(72, 12), facecolor='white')
+gs = GridSpec(2, 6, figure=fig, hspace=0.35, wspace=0.25,
+              left=0.025, right=0.985, top=0.90, bottom=0.07)
+
+fig.text(0.50, 0.965, 'Discovery Dynamics in the Adjacent Possible',
+         fontsize=20, fontweight='bold', ha='center')
+fig.text(0.50, 0.94, 'Mathlib  |  99,412 theorems  |  48,081 roots  |  Theorem-Theorem DAG  |  4 strategies x 3 recall modes x 17 memory sizes x 4 budgets',
+         fontsize=8, ha='center', color='#777')
+
+root_count = phase_data['root_count'] if phase_data else 48081
+N = phase_data['total_theorems'] if phase_data else 99412
+
+
+# ==============================================================================
+# ROW 1: EXPLORATION DYNAMICS
+# ==============================================================================
+
+# -- A: |A_t| Possibility Space ------------------------------------------------
+ax_a = fig.add_subplot(gs[0, 0])
 
 bfs_data = results['experiment1_adjacent_possible']['bfs']
 random_data = results['experiment1_adjacent_possible']['random']
 greedy_data = results['experiment1_adjacent_possible']['greedy']
-
-bfs_steps = [d['step'] for d in bfs_data]
-bfs_adjacent = [d['adjacent'] for d in bfs_data]
-
-random_steps = [d['step'] for d in random_data]
-random_adjacent = [d['adjacent'] for d in random_data]
-
-greedy_steps = [d['step'] for d in greedy_data]
-greedy_adjacent = [d['adjacent'] for d in greedy_data]
-
-ax1.plot(bfs_steps, bfs_adjacent, linewidth=2.5, color=colors['bfs'], label='BFS (Optimal)', alpha=0.9)
-ax1.plot(random_steps, random_adjacent, linewidth=2.5, color=colors['random'], label='Random Walk', alpha=0.9)
-ax1.plot(greedy_steps, greedy_adjacent, linewidth=2.5, color=colors['greedy'], label='Greedy Expansion', alpha=0.9)
-
-ax1.set_xlabel('Discovery Steps', fontsize=11, fontweight='bold', family='monospace')
-ax1.set_ylabel('|A(t)| - Adjacent Possible Size', fontsize=11, fontweight='bold', family='monospace')
-ax1.set_title('A. Evolution of Possibility Space', fontsize=12, fontweight='bold', family='monospace')
-ax1.legend(fontsize=10, frameon=True, edgecolor='black', loc='best')
-ax1.grid(True, alpha=0.3)
-ax1.set_yscale('log')
-
-# Panel 1.2: Known theorems over time
-ax2 = fig.add_subplot(gs[0, 1])
-
-bfs_known = [d['known'] for d in bfs_data]
-random_known = [d['known'] for d in random_data]
-greedy_known = [d['known'] for d in greedy_data]
-
-ax2.plot(bfs_steps, bfs_known, linewidth=2.5, color=colors['bfs'], label='BFS', alpha=0.9)
-ax2.plot(random_steps, random_known, linewidth=2.5, color=colors['random'], label='Random', alpha=0.9)
-ax2.plot(greedy_steps, greedy_known, linewidth=2.5, color=colors['greedy'], label='Greedy', alpha=0.9)
-
-ax2.set_xlabel('Discovery Steps', fontsize=11, fontweight='bold', family='monospace')
-ax2.set_ylabel('Known Theorems', fontsize=11, fontweight='bold', family='monospace')
-ax2.set_title('B. Knowledge Accumulation', fontsize=12, fontweight='bold', family='monospace')
-ax2.legend(fontsize=10, frameon=True, edgecolor='black')
-ax2.grid(True, alpha=0.3)
-
-# Panel 1.3: Strategy summary + interpretation
-ax3 = fig.add_subplot(gs[0, 2])
-ax3.axis('off')
-
 summary = results['experiment1_adjacent_possible']['summary']
-interp_text = f"""FINDING: Explosive Growth Phase
 
-Adjacent possible |A(t)| shows:
-• BFS: Rapid initial explosion, then
-  plateau as graph exhausted
-• Random: Slower growth, higher peak
-  (explores broadly before depth)
-• Greedy: Optimizes expansion but
-  similar to BFS
+for data, name in [(random_data, 'random'), (greedy_data, 'greedy'), (bfs_data, 'bfs')]:
+    steps = [d['step'] for d in data]
+    adj = [max(d['adjacent'], 1) for d in data]
+    lw = 2.2 if name == 'bfs' else 1.4
+    ax_a.plot(steps, adj, color=SC[name], linewidth=lw, alpha=0.85, label=SL[name])
 
-Coverage achieved:
-• BFS: {summary['bfs_coverage']:.1%}
-• Random: {summary['random_coverage']:.1%}
-• Greedy: {summary['greedy_coverage']:.1%}
+ax_a.set_yscale('log')
+style_ax(ax_a, 'A.  |A(t)| Possibility Space', 'Discovery Steps', '|A(t)|  (log)')
+ax_a.legend(fontsize=6, loc='center right', frameon=True, edgecolor='#CCC',
+            fancybox=False, handlelength=1.5)
 
-INTERPRETATION:
-Mathematical discovery is NOT uniform
-exploration. Early discoveries unlock
-explosive growth in possibilities,
-then possibility space contracts as
-easier results are exhausted.
+note(ax_a, 0.03, 0.25,
+     '|A(t)| explodes early then\n'
+     'contracts as easy results\n'
+     'exhaust. Peak ~15k options.\n'
+     'BFS = Greedy trajectory.')
 
-Greedy ≈ BFS suggests humans naturally
-optimize expansion, not randomly walk.
-"""
 
-ax3.text(0.05, 0.95, interp_text, transform=ax3.transAxes,
-        fontsize=9.5, verticalalignment='top', family='monospace',
-        bbox=dict(boxstyle='round', facecolor='white', edgecolor='black', linewidth=2.5))
+# -- B: Knowledge Accumulation -------------------------------------------------
+ax_b = fig.add_subplot(gs[0, 1])
 
-# ============================================================================
-# ROW 2: ACCESSIBILITY AND DILUTION
-# ============================================================================
+for data, name in [(random_data, 'random'), (greedy_data, 'greedy'), (bfs_data, 'bfs')]:
+    steps = [d['step'] for d in data]
+    known = [d['known'] for d in data]
+    lw = 2.2 if name == 'bfs' else 1.4
+    ax_b.plot(steps, known, color=SC[name], linewidth=lw, alpha=0.85, label=SL[name])
 
-# Panel 2.1: Accessibility time distribution
-ax4 = fig.add_subplot(gs[1, 0])
+ax_b.axhline(N * 0.979, color='#AAA', linewidth=0.8, linestyle='--', alpha=0.5)
+style_ax(ax_b, 'B.  Knowledge Accumulation', 'Discovery Steps', 'Known Theorems')
+ax_b.legend(fontsize=6, loc='center right', frameon=True, edgecolor='#CCC', fancybox=False)
 
-access_dist = results['experiment2_accessibility']['accessibility_distribution']
-ax4.hist(access_dist, bins=50, edgecolor='black', linewidth=1.5, color='white', alpha=0.9)
+note(ax_b, 0.03, 0.98,
+     f'BFS:    97.9% in 32 steps\n'
+     f'Random: 97.9% in 49k steps\n'
+     f'Greedy: 58.4% in 10k steps\n'
+     f'Ceiling: 97.9% (2.1% orphans)')
 
-mean_access = results['experiment2_accessibility']['accessibility_stats']['mean']
-ax4.axvline(mean_access, color='red', linestyle='--', linewidth=2.5,
-           label=f'Mean: {mean_access:.1f} steps')
 
-ax4.set_xlabel('Accessibility Time (BFS steps)', fontsize=11, fontweight='bold', family='monospace')
-ax4.set_ylabel('Number of Theorems', fontsize=11, fontweight='bold', family='monospace')
-ax4.set_title('C. When Theorems Become Provable', fontsize=12, fontweight='bold', family='monospace')
-ax4.legend(fontsize=10, frameon=True, edgecolor='black')
-ax4.grid(True, alpha=0.3)
-
-# Panel 2.2: Dilution factor distribution
-ax5 = fig.add_subplot(gs[1, 1])
+# -- C: Dilution ---------------------------------------------------------------
+ax_c = fig.add_subplot(gs[0, 2])
 
 dilution_dist = results['experiment2_accessibility']['dilution_distribution']
-ax5.hist(dilution_dist, bins=50, edgecolor='black', linewidth=1.5, color='white', alpha=0.9)
+mean_dil = results['experiment2_accessibility']['dilution_stats']['mean']
 
-mean_dilution = results['experiment2_accessibility']['dilution_stats']['mean']
-ax5.axvline(mean_dilution, color='red', linestyle='--', linewidth=2.5,
-           label=f'Mean: {mean_dilution:.0f} alternatives')
+ax_c.hist(dilution_dist, bins=50, edgecolor='#555', linewidth=0.4,
+          color='#E0E0E0', alpha=0.9, zorder=2)
+ax_c.axvline(mean_dil, color=ACCENT, linestyle='--', linewidth=1.5, zorder=3)
+ax_c.set_xscale('log')
+style_ax(ax_c, 'C.  Dilution: "Hiding in Plain Sight"',
+         '|A(t)| at Entry', 'Theorems')
 
-ax5.set_xlabel('Dilution Factor (|A(t)| at entry)', fontsize=11, fontweight='bold', family='monospace')
-ax5.set_ylabel('Number of Theorems', fontsize=11, fontweight='bold', family='monospace')
-ax5.set_title('D. "Hiding in Plain Sight"', fontsize=12, fontweight='bold', family='monospace')
-ax5.legend(fontsize=10, frameon=True, edgecolor='black')
-ax5.grid(True, alpha=0.3)
-ax5.set_xscale('log')
+# Accessibility inset
+ax_ins = ax_c.inset_axes([0.50, 0.40, 0.47, 0.52])
+access_dist = results['experiment2_accessibility']['accessibility_distribution']
+mean_acc = results['experiment2_accessibility']['accessibility_stats']['mean']
+ax_ins.hist(access_dist, bins=30, edgecolor='#555', linewidth=0.4, color='#D8D8D8', alpha=0.9)
+ax_ins.axvline(mean_acc, color=ACCENT, linestyle='--', linewidth=1)
+ax_ins.set_title(f'Accessibility (mean={mean_acc:.1f})', fontsize=6, pad=2)
+ax_ins.set_xlabel('BFS steps', fontsize=5)
+ax_ins.tick_params(labelsize=5)
+ax_ins.spines['top'].set_visible(False)
+ax_ins.spines['right'].set_visible(False)
 
-# Panel 2.3: Interpretation
-ax6 = fig.add_subplot(gs[1, 2])
-ax6.axis('off')
+note(ax_c, 0.03, 0.35,
+     f'Mean dilution: {mean_dil:,.0f}\n'
+     f'Theorems provable in\n'
+     f'{mean_acc:.1f} BFS steps but\n'
+     f'hidden among ~10k options')
 
-access_stats = results['experiment2_accessibility']
-interp2_text = f"""FINDING: Dilution Effect
 
-Accessibility time: When theorem first
-becomes provable (all prerequisites met)
-
-Mean accessibility: {access_stats['accessibility_stats']['mean']:.1f} steps
-Max accessibility: {access_stats['accessibility_stats']['max']} steps
-
-Dilution factor: How many alternatives
-exist when theorem enters A(t)
-
-Mean dilution: {access_stats['dilution_stats']['mean']:.0f} options
-Max dilution: {access_stats['dilution_stats']['max']:,} options!
-
-INTERPRETATION:
-Theorems entering A(t) when |A(t)| is
-large are "hidden" among many options.
-Discovery difficulty ≠ just depth, but
-also how diluted the theorem is.
-
-High-dilution theorems require either:
-• Strategic search (not random)
-• Explicit value recognition
-• Lucky exploration
-"""
-
-ax6.text(0.05, 0.95, interp2_text, transform=ax6.transAxes,
-        fontsize=9.5, verticalalignment='top', family='monospace',
-        bbox=dict(boxstyle='round', facecolor='white', edgecolor='black', linewidth=2.5))
-
-# ============================================================================
-# ROW 3: BOTTLENECKS AND GATEWAYS
-# ============================================================================
-
-# Panel 3.1: Removal impact distribution
-ax7 = fig.add_subplot(gs[2, 0])
+# -- D: Gateway Removal Impact -------------------------------------------------
+ax_d = fig.add_subplot(gs[0, 3])
 
 removal_dist = results['experiment3_bottlenecks']['removal_impact_distribution']
-ax7.hist(removal_dist, bins=50, edgecolor='black', linewidth=1.5, color='white', alpha=0.9)
+mean_rem = results['experiment3_bottlenecks']['removal_impact_stats']['mean']
 
-mean_removal = results['experiment3_bottlenecks']['removal_impact_stats']['mean']
-ax7.axvline(mean_removal, color='red', linestyle='--', linewidth=2.5,
-           label=f'Mean: {mean_removal:.3f}')
+ax_d.hist(removal_dist, bins=50, edgecolor='#555', linewidth=0.4,
+          color='#E0E0E0', alpha=0.9, zorder=2)
+ax_d.axvline(mean_rem, color=ACCENT, linestyle='--', linewidth=1.5, zorder=3)
+ax_d.set_yscale('log')
+style_ax(ax_d, 'D.  Gateway Removal Impact', 'Fraction Unreachable', 'Count (log)')
 
-ax7.set_xlabel('Removal Impact (fraction downstream unreachable)', fontsize=10, fontweight='bold', family='monospace')
-ax7.set_ylabel('Number of Theorems', fontsize=11, fontweight='bold', family='monospace')
-ax7.set_title('E. Gateway Theorem Identification', fontsize=12, fontweight='bold', family='monospace')
-ax7.legend(fontsize=10, frameon=True, edgecolor='black')
-ax7.grid(True, alpha=0.3)
+note(ax_d, 0.40, 0.98,
+     f'Mean impact: {mean_rem:.3f}\n'
+     f'Most theorems: near-zero\n'
+     f'Few critical gateways\n'
+     f'Robust interconnection')
 
-# Panel 3.2: Top bottlenecks
-ax8 = fig.add_subplot(gs[2, 1])
 
-top_bottlenecks = results['experiment3_bottlenecks']['top_bottlenecks'][:10]
-names = [b['theorem'].split('.')[-1][:20] for b in top_bottlenecks]
-impacts = [b['impact'] for b in top_bottlenecks]
+# -- E: Top 10 Gateways -------------------------------------------------------
+ax_e = fig.add_subplot(gs[0, 4])
 
+top_b = results['experiment3_bottlenecks']['top_bottlenecks'][:10]
+names = [b['theorem'].split('.')[-1][:20] for b in top_b]
+impacts = [b['impact'] for b in top_b]
 y_pos = np.arange(len(names))
-ax8.barh(y_pos, impacts, edgecolor='black', linewidth=1.5, color='white')
-ax8.set_yticks(y_pos)
-ax8.set_yticklabels(names, fontsize=9, family='monospace')
-ax8.set_xlabel('Downstream Impact', fontsize=10, fontweight='bold', family='monospace')
-ax8.set_title('F. Top 10 Gateway Theorems', fontsize=12, fontweight='bold', family='monospace')
-ax8.invert_yaxis()
-ax8.grid(True, alpha=0.3, axis='x')
 
-# Panel 3.3: Interpretation
-ax9 = fig.add_subplot(gs[2, 2])
-ax9.axis('off')
+bars = ax_e.barh(y_pos, impacts, height=0.6, edgecolor='#555', linewidth=0.5, color='#E8E8E8')
+for bar, imp in zip(bars, impacts):
+    if imp >= 0.9:
+        bar.set_facecolor('#FFD8D8')
+        bar.set_edgecolor(ACCENT)
+    ax_e.text(bar.get_width() + 0.02, bar.get_y() + bar.get_height()/2,
+              f'{imp:.3f}', fontsize=5.5, va='center', color='#555')
 
-removal_stats = results['experiment3_bottlenecks']
-top1 = top_bottlenecks[0]
-interp3_text = f"""FINDING: Sparse Gateways
+ax_e.set_yticks(y_pos)
+ax_e.set_yticklabels(names, fontsize=6, family='monospace')
+ax_e.invert_yaxis()
+ax_e.set_xlim(0, 1.15)
+style_ax(ax_e, 'E.  Top 10 Gateway Theorems', 'Downstream Impact', '')
 
-Removal impact: Fraction of downstream
-theorems unreachable if theorem removed
+note(ax_e, 0.35, 0.75,
+     'add_eq_zero: impact=1.0\n'
+     'Removing it severs ALL\n'
+     'descendants. Most have\n'
+     'near-zero impact.')
 
-Mean impact: {removal_stats['removal_impact_stats']['mean']:.3f}
-Max impact: {removal_stats['removal_impact_stats']['max']:.3f}
 
-Top gateway theorem:
-{top1['theorem'].split('.')[-1][:30]}
-Impact: {top1['impact']:.3f}
-
-INTERPRETATION:
-Mathematical knowledge does NOT have
-bow-tie structure with critical narrow
-gateways. Most theorems have low
-removal impact.
-
-This suggests robust interconnection:
-many alternative paths to any result.
-
-Discovery order relatively unimportant
-for ultimate coverage - multiple routes
-exist to most theorems.
-"""
-
-ax9.text(0.05, 0.95, interp3_text, transform=ax9.transAxes,
-        fontsize=9.5, verticalalignment='top', family='monospace',
-        bbox=dict(boxstyle='round', facecolor='white', edgecolor='black', linewidth=2.5))
-
-# ============================================================================
-# ROW 4: MEMORY-CONSTRAINED DISCOVERY
-# ============================================================================
-
-# Panel 4.1: Memory vs coverage
-ax10 = fig.add_subplot(gs[3, 0])
+# -- F: Memory-Constrained (old exp6) -----------------------------------------
+ax_f = fig.add_subplot(gs[0, 5])
 
 memory_data = results['experiment6_memory_constrained']['memory_coverage']
-memory_sizes = [d['memory_size'] for d in memory_data]
+mem_sizes = [d['memory_size'] for d in memory_data]
 coverages = [d['coverage'] for d in memory_data]
 
-ax10.plot(memory_sizes, coverages, 'o-', linewidth=2.5, markersize=10,
-         color='black', markerfacecolor='white', markeredgewidth=2)
+ax_f.plot(mem_sizes, coverages, 'o-', linewidth=2, markersize=8,
+          color='black', markerfacecolor='white', markeredgewidth=1.5, zorder=3)
+ax_f.fill_between(mem_sizes, 0, coverages, alpha=0.03, color='black')
+ax_f.axhline(root_count / N, color='#CCC', linewidth=0.8, linestyle='-', alpha=0.5)
 
-ax10.set_xlabel('Memory Size K (working memory)', fontsize=11, fontweight='bold', family='monospace')
-ax10.set_ylabel('Coverage (fraction discovered)', fontsize=11, fontweight='bold', family='monospace')
-ax10.set_title('G. Memory-Constrained Discovery', fontsize=12, fontweight='bold', family='monospace')
-ax10.set_xscale('log')
-ax10.grid(True, alpha=0.3)
-ax10.axhline(0.5, color='red', linestyle='--', alpha=0.5, linewidth=1.5)
+for ms, cov in zip(mem_sizes, coverages):
+    label = 'inf' if ms > 100000 else f'{ms:,}'
+    ax_f.annotate(f'K={label}\n{cov:.1%}', (ms, cov),
+                  textcoords='offset points', xytext=(0, 12),
+                  fontsize=6, ha='center', color='#555')
 
-# Panel 4.2: Zoom on phase transition
-ax11 = fig.add_subplot(gs[3, 1])
+ax_f.set_xscale('log')
+ax_f.set_ylim(0, max(coverages) * 1.2)
+style_ax(ax_f, 'F.  Memory-Constrained (Random, no recall)',
+         'Memory Size K', 'Coverage')
 
-ax11.plot(memory_sizes, coverages, 'o-', linewidth=3, markersize=12,
-         color='black', markerfacecolor='white', markeredgewidth=2.5)
+note(ax_f, 0.03, 0.55,
+     'Smooth degradation\n'
+     'No sharp phase transition\n'
+     'K=10k: 49.5% (barely above\n'
+     f'baseline {root_count/N:.1%})')
 
-# Highlight critical region
-for i in range(len(memory_sizes)-1):
-    if coverages[i] < 0.5 and coverages[i+1] > 0.5:
-        ax11.axvspan(memory_sizes[i], memory_sizes[i+1], alpha=0.2, color='red')
 
-ax11.set_xlabel('Memory Size K', fontsize=11, fontweight='bold', family='monospace')
-ax11.set_ylabel('Coverage', fontsize=11, fontweight='bold', family='monospace')
-ax11.set_title('H. Phase Transition Search', fontsize=12, fontweight='bold', family='monospace')
-ax11.grid(True, alpha=0.3)
-ax11.set_ylim([0, 1.05])
+# ==============================================================================
+# ROW 2: PHASE TRANSITIONS
+# ==============================================================================
 
-# Panel 4.3: Summary + Interpretation
-ax12 = fig.add_subplot(gs[3, 2])
-ax12.axis('off')
+def plot_phase_panel(ax, phase_data, recall_mode, title):
+    """Plot survival curves for one recall mode."""
+    baseline = phase_data['baseline_coverage']
+    budgets_sorted = sorted(phase_data['budgets'])
 
-# Find critical K
-critical_K = None
-for i in range(len(coverages)-1):
-    if coverages[i] < 0.5 and coverages[i+1] > 0.5:
-        critical_K = (memory_sizes[i], memory_sizes[i+1])
-        break
+    ax.axhline(baseline, color='#CCC', linewidth=0.8, linestyle='-', alpha=0.5, zorder=1)
+    ax.text(55, baseline - 0.012, f'baseline {baseline:.1%}',
+            fontsize=5.5, color='#AAA', va='top')
 
-interp4_text = f"""FINDING: Memory Threshold
+    # BFS ceiling
+    bfs_key = f'bfs__{recall_mode}'
+    if bfs_key in phase_data['results']:
+        for e in phase_data['results'][bfs_key]:
+            if e['label'] == 'inf':
+                bfs_inf = e['by_budget'].get(str(max(budgets_sorted)), {}).get('coverage', 0)
+                if bfs_inf > 0.9:
+                    ax.axhline(bfs_inf, color='#AADDAA', linewidth=0.8, linestyle='-', alpha=0.4, zorder=1)
+                    ax.text(55, bfs_inf + 0.005, f'ceiling {bfs_inf:.1%}',
+                            fontsize=5.5, color='#5A9A5A', va='bottom')
 
-Bounded working memory limits what
-can be discovered. Theorem enters A(t)
-only if ALL prerequisites in last K
-discovered theorems.
+    for strat in phase_data['strategies']:
+        key = f"{strat}__{recall_mode}"
+        if key not in phase_data['results']:
+            continue
+        entries = phase_data['results'][key]
 
-Coverage results:
-K=infinite: {coverages[0]:.1%}
-K=10000: {coverages[1]:.1%}
-K=1000: {coverages[2]:.1%}
-K=100: {coverages[3]:.1%}
+        for budget in budgets_sorted:
+            bs = BLS[str(budget)]
+            ks = [e['memory_size'] for e in entries]
+            covs = []
+            for entry in entries:
+                cov_data = entry['by_budget'].get(str(budget), {})
+                covs.append(cov_data.get('coverage', 0) if isinstance(cov_data, dict) else 0)
+            ax.plot(ks, covs, color=SC[strat], linewidth=bs['lw'], linestyle=bs['ls'], zorder=4)
 
-"""
+            if budget == max(budgets_sorted):
+                ax.plot(ks[-1], covs[-1], 'D', color=SC[strat], markersize=5,
+                        markeredgecolor='white', markeredgewidth=0.8, zorder=6)
 
-if critical_K:
-    interp4_text += f"""Critical memory K* ≈ {critical_K[0]}-{critical_K[1]}
-(50% coverage threshold)
+    style_ax(ax, title, 'Memory Size K', 'Coverage')
+    ax.set_xscale('log')
+    ax.set_ylim(0.44, 1.03)
+    ax.set_xlim(40, 1500000)
+    ax.xaxis.set_major_formatter(mticker.FuncFormatter(
+        lambda x, p: '$\\infty$' if x >= 500000 else f'{int(x):,}'))
+    ax.axhspan(baseline, 1.0, alpha=0.008, color='green', zorder=0)
 
-"""
 
-interp4_text += """INTERPRETATION:
-Smooth growth (not sharp transition)
-suggests continuous difficulty spectrum.
+if phase_data is not None:
+    # -- G: No Recall --------------------------------------------------------------
+    ax_g = fig.add_subplot(gs[1, 0])
+    plot_phase_panel(ax_g, phase_data, 'none', 'G.  Phase: No Recall')
 
-Implications for bounded agents:
-• K<50: Severely limited discovery
-• K>200: Most mathematics accessible
-• No single threshold complexity
+    # Strategy + budget legends
+    strat_handles = [mlines.Line2D([], [], color=SC[s], linewidth=1.8, label=SL[s])
+                     for s in phase_data['strategies']]
+    leg1 = ax_g.legend(handles=strat_handles, loc='upper left', fontsize=6,
+                       frameon=True, edgecolor='#CCC', fancybox=False,
+                       title='Strategy', title_fontsize=6, handlelength=1.5)
+    ax_g.add_artist(leg1)
 
-Human mathematicians use external
-memory (papers, notes) to exceed
-biological working memory limits!
-"""
+    budget_handles = [mlines.Line2D([], [], color='#555',
+                      linewidth=BLS[str(b)]['lw'], linestyle=BLS[str(b)]['ls'],
+                      label=BLS[str(b)]['label'])
+                      for b in sorted(phase_data['budgets'])]
+    ax_g.legend(handles=budget_handles, loc='lower right', fontsize=5.5,
+                frameon=True, edgecolor='#CCC', fancybox=False,
+                title='Budget', title_fontsize=5.5)
 
-ax12.text(0.05, 0.95, interp4_text, transform=ax12.transAxes,
-        fontsize=9.5, verticalalignment='top', family='monospace',
-        bbox=dict(boxstyle='round', facecolor='white', edgecolor='black', linewidth=2.5))
+    note(ax_g, 0.35, 0.28,
+         'Without recall, agent\n'
+         'stalls when frontier\n'
+         'empties. K < 1k:\n'
+         'all strategies = baseline')
 
-# Save figure
-plt.tight_layout()
-plt.savefig(OUTPUT_PNG, dpi=200, bbox_inches='tight', facecolor='white')
-print(f"\nSaved figure to: {OUTPUT_PNG}")
+    # -- H: Matched Recall ---------------------------------------------------------
+    ax_h = fig.add_subplot(gs[1, 1])
+    plot_phase_panel(ax_h, phase_data, 'matched', 'H.  Phase: Matched Recall')
 
-# Also save as PDF
-OUTPUT_PDF = FIGS_DIR / "experiment2_search_proof_comprehensive.pdf"
+    note(ax_h, 0.03, 0.50,
+         'Strategy-matched recall\n'
+         'helps most at mid-K.\n'
+         'Greedy + recall lifts\n'
+         'small-K coverage ~5%')
+
+    # -- I: Hub Recall -------------------------------------------------------------
+    ax_i = fig.add_subplot(gs[1, 2])
+    plot_phase_panel(ax_i, phase_data, 'hub', 'I.  Phase: Hub Recall')
+
+    note(ax_i, 0.03, 0.50,
+         'Hub recall (out-degree)\n'
+         'universally effective.\n'
+         'All strategies converge\n'
+         'to similar trajectories.')
+
+    # -- J: Coverage Gain from Recall ----------------------------------------------
+    ax_j = fig.add_subplot(gs[1, 3])
+    max_b = str(max(phase_data['budgets']))
+
+    for strat in phase_data['strategies']:
+        none_entries = phase_data['results'].get(f"{strat}__none", [])
+        matched_entries = phase_data['results'].get(f"{strat}__matched", [])
+        hub_entries = phase_data['results'].get(f"{strat}__hub", [])
+        if not (none_entries and matched_entries and hub_entries):
+            continue
+
+        ks = [e['memory_size'] for e in none_entries]
+        gain_matched, gain_hub = [], []
+        for i in range(len(ks)):
+            cn = none_entries[i]['by_budget'].get(max_b, {}).get('coverage', 0)
+            cm = matched_entries[i]['by_budget'].get(max_b, {}).get('coverage', 0)
+            ch = hub_entries[i]['by_budget'].get(max_b, {}).get('coverage', 0)
+            gain_matched.append(cm - cn)
+            gain_hub.append(ch - cn)
+
+        ax_j.plot(ks, gain_matched, color=SC[strat], linewidth=1.8, linestyle='-', zorder=4)
+        ax_j.plot(ks, gain_hub, color=SC[strat], linewidth=1.2, linestyle='--', alpha=0.7, zorder=3)
+
+    style_ax(ax_j, 'J.  Coverage Gain from Recall (@60k)',
+             'Memory Size K', 'Coverage Gain')
+    ax_j.set_xscale('log')
+    ax_j.set_xlim(40, 1500000)
+    ax_j.xaxis.set_major_formatter(mticker.FuncFormatter(
+        lambda x, p: '$\\infty$' if x >= 500000 else f'{int(x):,}'))
+    ax_j.axhline(0, color='#CCC', linewidth=0.8, alpha=0.5)
+
+    h_handles = [mlines.Line2D([], [], color=SC[s], linewidth=1.5, label=SL[s])
+                 for s in phase_data['strategies']]
+    h_handles += [mlines.Line2D([], [], color='#555', linewidth=1.5, label='Matched'),
+                  mlines.Line2D([], [], color='#555', linewidth=1, linestyle='--', alpha=0.7, label='Hub')]
+    ax_j.legend(handles=h_handles, fontsize=5.5, loc='upper right',
+                frameon=True, edgecolor='#CCC', fancybox=False, ncol=2)
+
+    note(ax_j, 0.03, 0.98,
+         'Solid = matched recall\n'
+         'Dashed = hub recall\n'
+         'Peak gain at mid-K\n'
+         'where recall matters most')
+
+    # -- K: Recall Fraction --------------------------------------------------------
+    ax_k = fig.add_subplot(gs[1, 4])
+
+    for strat in phase_data['strategies']:
+        for rm, ls_style in [('matched', '-'), ('hub', '--')]:
+            entries = phase_data['results'].get(f"{strat}__{rm}", [])
+            if not entries:
+                continue
+            ks = [e['memory_size'] for e in entries]
+            fracs = []
+            for e in entries:
+                d = e['by_budget'].get(max_b, {})
+                disc = d.get('discoveries', 0)
+                rec = d.get('recalls', 0)
+                total = disc + rec
+                fracs.append(rec / total if total > 0 else 0)
+            lw = 1.8 if rm == 'matched' else 1.0
+            ax_k.plot(ks, fracs, color=SC[strat], linewidth=lw, linestyle=ls_style,
+                      alpha=0.85 if rm == 'matched' else 0.6)
+
+    style_ax(ax_k, 'K.  Recall Fraction (@60k budget)',
+             'Memory Size K', 'Recalls / Total Steps')
+    ax_k.set_xscale('log')
+    ax_k.set_xlim(40, 1500000)
+    ax_k.set_ylim(-0.02, 1.02)
+    ax_k.xaxis.set_major_formatter(mticker.FuncFormatter(
+        lambda x, p: '$\\infty$' if x >= 500000 else f'{int(x):,}'))
+
+    k_handles = [mlines.Line2D([], [], color=SC[s], linewidth=1.5, label=SL[s])
+                 for s in phase_data['strategies']]
+    k_handles += [mlines.Line2D([], [], color='#555', linewidth=1.5, label='Matched'),
+                  mlines.Line2D([], [], color='#555', linewidth=1, linestyle='--', label='Hub')]
+    ax_k.legend(handles=k_handles, fontsize=5.5, loc='upper left',
+                frameon=True, edgecolor='#CCC', fancybox=False, ncol=2)
+
+    note(ax_k, 0.55, 0.98,
+         'Small K: mostly recalls\n'
+         '(memory overflows fast)\n'
+         'Large K: zero recalls\n'
+         '(memory holds everything)')
+
+    # -- L: Heatmap: Strategy x Memory (max budget coverage) -----------------------
+    ax_l = fig.add_subplot(gs[1, 5])
+
+    strats = phase_data['strategies']
+    recalls = phase_data['recall_modes']
+    # Select representative memory sizes
+    target_ks = [100, 1000, 5000, 20000, 50000, 100000]
+    k_labels = ['100', '1k', '5k', '20k', '50k', '100k']
+
+    rows = []
+    row_labels = []
+    for strat in strats:
+        for rm in recalls:
+            key = f"{strat}__{rm}"
+            entries = phase_data['results'].get(key, [])
+            if not entries:
+                continue
+            row = []
+            for tk in target_ks:
+                # Find closest memory size
+                best_entry = min(entries, key=lambda e: abs(e['memory_size'] - tk))
+                cov = best_entry['by_budget'].get(max_b, {}).get('coverage', 0)
+                row.append(cov)
+            rows.append(row)
+            row_labels.append(f'{SL[strat]}_{rm[:3]}')
+
+    matrix = np.array(rows)
+    im = ax_l.imshow(matrix, cmap='YlOrRd', aspect='auto', vmin=0.48, vmax=1.0)
+    ax_l.set_xticks(range(len(k_labels)))
+    ax_l.set_xticklabels(k_labels, fontsize=6)
+    ax_l.set_yticks(range(len(row_labels)))
+    ax_l.set_yticklabels(row_labels, fontsize=5.5, family='monospace')
+    ax_l.set_xlabel('Memory K', fontsize=7.5, labelpad=3)
+
+    # Annotate cells
+    for i in range(len(row_labels)):
+        for j in range(len(k_labels)):
+            val = matrix[i, j]
+            color = 'white' if val > 0.75 else '#333'
+            ax_l.text(j, i, f'{val:.2f}', ha='center', va='center',
+                      fontsize=5, color=color, fontweight='bold')
+
+    ax_l.set_title('L.  Coverage Heatmap (@60k budget)', fontsize=9.5,
+                    fontweight='bold', pad=5, loc='left')
+    ax_l.spines['top'].set_visible(False)
+    ax_l.spines['right'].set_visible(False)
+
+    # Colorbar
+    cbar = fig.colorbar(im, ax=ax_l, fraction=0.046, pad=0.04, shrink=0.8)
+    cbar.ax.tick_params(labelsize=5.5)
+    cbar.set_label('Coverage', fontsize=6.5)
+
+else:
+    for col in range(6):
+        ax = fig.add_subplot(gs[1, col])
+        ax.axis('off')
+        ax.text(0.5, 0.5, "Run experiment2_phase_transition.py first",
+                transform=ax.transAxes, fontsize=10, ha='center')
+
+
+# ==============================================================================
+# SAVE
+# ==============================================================================
+
+FIGS_DIR.mkdir(exist_ok=True)
+plt.savefig(OUTPUT_PNG, dpi=180, bbox_inches='tight', facecolor='white')
+print(f"Saved: {OUTPUT_PNG}")
+
 plt.savefig(OUTPUT_PDF, bbox_inches='tight', facecolor='white')
-print(f"Saved PDF to: {OUTPUT_PDF}")
+print(f"Saved: {OUTPUT_PDF}")
 
 plt.close()
-
-print("\nVisualization complete!")
+print("Done!")
