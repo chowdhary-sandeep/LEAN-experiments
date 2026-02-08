@@ -2,7 +2,15 @@
 
 ## Overview
 
-This research program treats the Mathlib theorem dependency graph as a constraint-based possibility space where mathematical discovery proceeds through exploration of the "adjacent possible" - theorems that become provable given current knowledge. Unlike models of discovery as free exploration, this approach recognizes that mathematical accessibility is determined by hard logical constraints: a theorem cannot be discovered until all its prerequisite theorems exist in the knowledge base. The DAG structure in our data represents ground truth about these dependencies, enabling postdictive analysis of what could and could not have been discovered at each stage of mathematical development. Our goal is to quantify discovery difficulty not as search complexity but as structural properties of how the possibility space expands and contracts during exploration.
+This research program treats the Mathlib theorem dependency graph as a constraint-based possibility space where mathematical discovery proceeds through exploration of the "adjacent possible" - theorems that become provable given current knowledge.
+
+**Graph Structure:** All nodes are theorems. An edge A→B means "theorem B uses theorem A in its proof." The DAG represents ground truth about theorem dependencies.
+
+**Initial State:** All root nodes (in-degree 0) from all connected components are "known" at t=0, enabling discovery of all downstream theorems. This ensures the entire graph is theoretically discoverable.
+
+**Discovery Model:** An agent exploring the graph can discover downstream theorems when all their prerequisites are in the agent's visited set (subject to memory constraints).
+
+Unlike models of discovery as free exploration, this approach recognizes that mathematical accessibility is determined by hard logical constraints: a theorem cannot be discovered until all its prerequisite theorems have been visited. Our goal is to quantify discovery difficulty not as search complexity but as structural properties of how the possibility space expands and contracts during exploration, and how memory constraints limit discoverability.
 
 ## Experiment 1: Dynamics of the Adjacent Possible
 
@@ -22,11 +30,41 @@ Your existing work on premise co-occurrence patterns (crystallization) identifie
 
 ## Experiment 5: Strategy Comparison and Human Discovery Order
 
-Different exploration strategies should lead to different trajectories through the adjacent possible, and comparing these trajectories to actual Mathlib development history provides validation of which strategies capture human-like mathematical discovery behavior. We implement four strategies: (1) BFS optimal expansion discovering theorems as soon as accessible, (2) random walk uniformly sampling from A_t at each step, (3) greedy expansion selecting the theorem from A_t that maximizes |A_{t+1}|, and (4) premise-cluster following that preferentially discovers theorems matching previously seen crystallization patterns. We run each strategy to full graph coverage (or timeout) and measure the discovery time distribution for all theorems, the total steps required for complete coverage, and the trajectory of |A_t| over time. We then extract the approximate chronological development order from Mathlib commit history (using file creation dates and dependency analysis) to obtain a proxy for human discovery order, and measure the correlation between human discovery times and each strategy's discovery times. If greedy expansion or premise-cluster following matches human discovery order better than random walk, this would validate that human mathematicians use strategic heuristics to navigate the adjacent possible rather than exploring uniformly, and would identify which heuristics are most predictive. If random walk matches human order equally well, this would be a profound finding suggesting that despite extensive training and strategic intent, mathematical discovery is effectively random exploration constrained only by accessibility, implying that the graph structure dominates over human choice.
+Different exploration strategies should lead to different trajectories through the adjacent possible, revealing the impact of search heuristics on discovery efficiency and coverage.
+
+**Strategies Implemented:**
+1. **BFS (Breadth-First Search):** Optimal expansion - discovers all accessible theorems at each level before proceeding. Runs to completion (no time limit).
+2. **DFS (Depth-First Search):** Explores deep paths before backtracking. Runs to completion (no time limit).
+3. **Random Walk:** Uniformly samples one theorem from A_t at each step. Fixed timestep budget (e.g., 50,000 steps).
+4. **Greedy Expansion:** Selects theorem from A_t that maximizes |A_{t+1}|. Fixed timestep budget (e.g., 10,000 steps).
+
+**Time Budget:** BFS and DFS are efficient enough to run to completion. Random and Greedy use fixed timestep budgets to ensure reasonable runtime while allowing meaningful coverage comparison.
+
+We measure:
+- **Coverage:** Total theorems discovered within budget
+- **|A_t| trajectories:** How possibility space evolves under each strategy
+- **Efficiency:** Steps per theorem discovered
+
+If greedy expansion achieves high coverage quickly, this validates strategic search over random exploration. If random walk performs comparably, this suggests graph structure dominates over search heuristics.
 
 ## Experiment 6: Memory-Constrained Discovery and Phase Transitions
 
-Real mathematical agents (humans or bounded computational systems) cannot maintain perfect recall of all previously encountered theorems, and imposing memory constraints on discovery agents may reveal fundamental limitations on what can be discovered with bounded cognitive resources. We modify the discovery rule such that a theorem T enters A_t only if all its prerequisites are within the agent's memory window of the last K discovered theorems, where K ranges from 5 to 500, and we measure what fraction of the full graph becomes discoverable at each K value. For each theorem T, we compute the "critical memory K_c(T)" - the minimum memory required for any strategy to discover T - and we examine the distribution of K_c across all theorems. We run random walk simulations at each K value and measure coverage (fraction of theorems ever discovered), rediscovery rate (how often theorems are visited multiple times as prerequisites cycle in and out of memory), and discovery time distributions. If we observe a sharp phase transition at some critical K* where coverage jumps from near-zero to near-complete, this would indicate that mathematical discovery has a fundamental memory complexity threshold, and theorems requiring K > K* represent a qualitatively different difficulty class requiring either extended working memory or external memory aids (notes, papers). If coverage increases smoothly with K, this would suggest memory constraints create a continuous difficulty spectrum rather than discrete complexity classes, and any memory size enables discovery of some fixed fraction of mathematics.
+Real mathematical agents (humans or bounded computational systems) cannot maintain perfect recall of all previously encountered theorems, and imposing memory constraints on discovery agents may reveal fundamental limitations on what can be discovered with bounded cognitive resources.
+
+**Memory Model:** A theorem T can be discovered if all its prerequisites are within the agent's memory window of the last K visited theorems. We test four memory regimes:
+- **Infinite memory:** Agent remembers all visited theorems (baseline for full discoverability)
+- **K = 10,000:** Very large working memory
+- **K = 1,000:** Moderate working memory
+- **K = 100:** Limited working memory
+
+**Discovery Budget:** BFS and DFS run to completion (no time limit, as they are efficient). Random walk and greedy strategies use fixed timestep budgets (e.g., 50,000 and 10,000 steps respectively) to ensure reasonable runtime.
+
+For each memory size K, we measure:
+- **Coverage:** Fraction of theorems discovered
+- **Discovery trajectories:** How |A_t| evolves with memory constraints
+- **Critical theorems:** Which theorems become undiscoverable at small K
+
+If we observe a sharp phase transition at some critical K* where coverage drops dramatically, this would indicate that mathematical discovery has a fundamental memory complexity threshold. If coverage decreases smoothly with K, this would suggest memory constraints create a continuous difficulty spectrum rather than discrete complexity classes.
 
 ## Experiment 7: MDL Gain and Adjacent Possible Expansion
 

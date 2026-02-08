@@ -32,41 +32,49 @@ print("="*80)
 print("SEARCH PROOF DYNAMICS: Adjacent Possible Analysis")
 print("="*80)
 
-# Load theorem-premise DAG
-print("\nLoading theorem-premise DAG...")
+# Load theorem DAG
+print("\nLoading theorem dependency DAG...")
 with open(CACHE_BUNDLE, "rb") as f:
     bundle = pickle.load(f)
 
 G = bundle["G_original"]
 print(f"  Loaded graph: {G.number_of_nodes():,} nodes, {G.number_of_edges():,} edges")
 
-# Get theorem nodes only (exclude pure premises)
-theorem_nodes = {n for n in G.nodes() if G.nodes[n].get("node_type") == "theorem"}
-premise_nodes = set(G.nodes()) - theorem_nodes
-print(f"  Theorem nodes: {len(theorem_nodes):,}")
-print(f"  Premise nodes (definitions, axioms): {len(premise_nodes):,}")
+# ALL nodes are theorems (edge A→B means "B uses A in its proof")
+all_theorems = set(G.nodes())
+print(f"  Total theorems: {len(all_theorems):,}")
 
-# CRITICAL: All premises are "known from the start" (they're definitions/axioms)
-# We only track discovery of THEOREMS
-# Axioms = theorems that depend only on premises (no theorem prerequisites)
-axioms = []
-for thm in theorem_nodes:
-    prereqs = set(G.predecessors(thm))
-    theorem_prereqs = prereqs & theorem_nodes
-    if not theorem_prereqs:  # Only depends on premises, not other theorems
-        axioms.append(thm)
+# Find all root nodes (in-degree 0) from all connected components
+# These are the starting "known" theorems that enable discovery of downstream theorems
+root_nodes = [n for n in all_theorems if G.in_degree(n) == 0]
+print(f"  Root nodes (in-degree 0): {len(root_nodes):,}")
 
-print(f"  Theorem-axioms (no theorem prereqs): {len(axioms):,}")
+# Check connectivity
+num_components = nx.number_weakly_connected_components(G)
+print(f"  Weakly connected components: {num_components}")
 
-# OPTIMIZATION: Pre-cache THEOREM predecessor sets (premises always known)
-print("\nPre-caching THEOREM prerequisite sets (excluding premises)...")
+# Get roots from each component
+roots_by_component = []
+for component in nx.weakly_connected_components(G):
+    component_roots = [n for n in component if G.in_degree(n) == 0]
+    if component_roots:
+        roots_by_component.extend(component_roots)
+
+print(f"  Roots covering all components: {len(roots_by_component):,}")
+
+# Use all roots as starting axioms
+axioms = root_nodes
+print(f"  Starting axioms (all roots): {len(axioms):,}")
+
+# OPTIMIZATION: Pre-cache all prerequisite sets
+print("\nPre-caching prerequisite sets for all theorems...")
 prereq_cache = {}
-for node in theorem_nodes:
-    all_prereqs = set(G.predecessors(node))
-    # Only count theorem prerequisites (premises are always "known")
-    theorem_prereqs = all_prereqs & theorem_nodes
-    prereq_cache[node] = theorem_prereqs
+for node in all_theorems:
+    prereq_cache[node] = set(G.predecessors(node))
 print(f"  Cached {len(prereq_cache):,} prerequisite sets")
+
+# Update global variable
+theorem_nodes = all_theorems
 
 results = {}
 
@@ -299,16 +307,16 @@ def discover_greedy(axioms, max_steps=5000):
 
     return trajectory, iap.get_known()
 
-print("\nRunning BFS discovery...")
-bfs_traj, bfs_known = discover_bfs(axioms, max_steps=1000)
+print("\nRunning BFS discovery (no time limit, runs to completion)...")
+bfs_traj, bfs_known = discover_bfs(axioms, max_steps=999999)
 print(f"  BFS: Discovered {len(bfs_known):,} theorems in {len(bfs_traj)} steps")
 
-print("\nRunning Random Walk discovery...")
-random_traj, random_known = discover_random(axioms, max_steps=5000)
+print("\nRunning Random Walk discovery (timestep budget: 50,000)...")
+random_traj, random_known = discover_random(axioms, max_steps=50000)
 print(f"  Random: Discovered {len(random_known):,} theorems in {len(random_traj)} steps")
 
-print("\nRunning Greedy Expansion discovery...")
-greedy_traj, greedy_known = discover_greedy(axioms, max_steps=1000)
+print("\nRunning Greedy Expansion discovery (timestep budget: 10,000)...")
+greedy_traj, greedy_known = discover_greedy(axioms, max_steps=10000)
 print(f"  Greedy: Discovered {len(greedy_known):,} theorems in {len(greedy_traj)} steps")
 
 results['experiment1_adjacent_possible'] = {
@@ -521,13 +529,15 @@ def discover_with_memory(axioms, memory_size, max_steps=3000, seed=42):
     return coverage
 
 print("\nTesting memory-constrained discovery...")
-memory_sizes = [5, 10, 20, 50, 100, 200, 500, 1000]
+# Test: infinite (all visited), K=10000, K=1000, K=100
+memory_sizes = [999999, 10000, 1000, 100]  # 999999 = effectively infinite
+memory_labels = ['infinite', '10000', '1000', '100']
 memory_results = []
 
-for K in memory_sizes:
-    print(f"  Memory size K={K}...")
-    coverage = discover_with_memory(axioms, K, max_steps=10000)
-    memory_results.append({'memory_size': K, 'coverage': coverage})
+for K, label in zip(memory_sizes, memory_labels):
+    print(f"  Memory size K={label}...")
+    coverage = discover_with_memory(axioms, K, max_steps=100000)
+    memory_results.append({'memory_size': K, 'memory_label': label, 'coverage': coverage})
     print(f"    Coverage: {coverage:.3f}")
 
 results['experiment6_memory_constrained'] = {
@@ -563,9 +573,10 @@ print(f"  Mean removal impact: {results['experiment3_bottlenecks']['removal_impa
 print(f"  Top bottleneck: {top_bottlenecks[0][0].split('.')[-1]} ({top_bottlenecks[0][1]:.3f})")
 
 print(f"\nExperiment 6 - Memory:")
-print(f"  Coverage at K=10: {memory_results[1]['coverage']:.3f}")
-print(f"  Coverage at K=100: {memory_results[4]['coverage']:.3f}")
-print(f"  Coverage at K=500: {memory_results[6]['coverage']:.3f}")
+print(f"  Coverage at K=infinite: {memory_results[0]['coverage']:.3f}")
+print(f"  Coverage at K=10000: {memory_results[1]['coverage']:.3f}")
+print(f"  Coverage at K=1000: {memory_results[2]['coverage']:.3f}")
+print(f"  Coverage at K=100: {memory_results[3]['coverage']:.3f}")
 
 print("\n" + "="*80)
 print("ANALYSIS COMPLETE")

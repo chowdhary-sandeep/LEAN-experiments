@@ -338,9 +338,10 @@ only if ALL prerequisites in last K
 discovered theorems.
 
 Coverage results:
-K=10: {coverages[1]:.1%}
-K=100: {coverages[4]:.1%}
-K=500: {coverages[6]:.1%}
+K=infinite: {coverages[0]:.1%}
+K=10000: {coverages[1]:.1%}
+K=1000: {coverages[2]:.1%}
+K=100: {coverages[3]:.1%}
 
 """
 

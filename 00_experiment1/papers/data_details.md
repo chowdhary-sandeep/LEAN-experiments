@@ -2,6 +2,21 @@
 
 Quick reference for main data locations in this project.
 
+## Important Terminology
+
+**CLARIFICATION - All Nodes are Theorems:**
+- The network is a **DAG (Directed Acyclic Graph) of theorems**
+- **"Premise"** is NOT a separate class of node - it just means "a theorem that appears in the proof of another theorem"
+- Edge A→B means: "theorem B uses theorem A in its proof" (A is a *premise of* B)
+- **All nodes are theorems** - there is no need for separate node classes
+- Some nodes may be labeled "premise" vs "theorem" in metadata, but this is a historical artifact from the build process
+
+**Tactics vs Theorems:**
+- **Tactics** are proof steps (e.g., `rw`, `simp`, `intro`) - these are procedural proof commands
+- **Theorems** are mathematical statements with proofs
+- Discovery dynamics analysis focuses on the **theorem dependency DAG**, not tactics
+- Tactics appear in the proof traces but are not part of the theorem dependency graph
+
 ---
 
 ## Primary Data Files
@@ -35,17 +50,19 @@ Quick reference for main data locations in this project.
 
 ---
 
-### 2. Theorem-Premise Network (DAG)
+### 2. Theorem Dependency Network (DAG)
 **Location:** `cache/bundle.pkl`
 
 - **What:** Cached networkx DiGraph of theorem dependencies
 - **Format:** Python pickle (NetworkX graph object)
 - **Structure:**
-  - Nodes: theorem/premise names
-  - Edges: premise → theorem (meaning "theorem uses premise")
-  - Node attributes: `node_type` ("theorem" or "premise")
-- **Statistics:** 99,412 nodes, 358,810 edges
+  - **Nodes:** ALL nodes are theorems (99,412 total)
+  - **Edges:** A→B means "theorem B uses theorem A in its proof" (A is a *premise of* B)
+  - **Node attributes:** `node_type` ("theorem" or "premise") - *historical label only, all are theorems*
+- **Statistics:** 99,412 theorem nodes, 358,810 dependency edges
 - **Built by:** `00_theorem_premise_network.py`
+
+**Important:** The terms "theorem" and "premise" in `node_type` are labels from the build process. In the dependency graph, **all nodes represent theorems**. A "premise" is simply a theorem that is cited in another theorem's proof.
 
 **Load with:**
 ```python
@@ -53,6 +70,13 @@ import pickle
 with open("cache/bundle.pkl", "rb") as f:
     bundle = pickle.load(f)
 G = bundle["G_original"]
+
+# All nodes are theorems
+all_theorems = set(G.nodes())
+
+# Edge A→B means "B uses A in proof"
+# Example: if there's an edge Nat.add_comm → Nat.add_mul_comm,
+# then Nat.add_mul_comm uses Nat.add_comm in its proof
 ```
 
 ---
@@ -81,8 +105,9 @@ G = bundle["G_original"]
 **Location:** Not saved to file (computed on-demand)
 
 - **Script:** `03_crystallization_analysis.py`
-- **What:** Premise co-occurrence patterns (which premise sets appear together frequently)
-- **Key finding:** 1.69M patterns found, top pattern `{mul_assoc, mul_comm}` in 307 theorems
+- **What:** Theorem co-occurrence patterns in proofs (which theorems are cited together frequently)
+- **Terminology:** "Premise co-occurrence" = theorems that appear together as dependencies of other theorems
+- **Key finding:** 1.69M patterns found, top pattern `{mul_assoc, mul_comm}` cited together in 307 theorems
 - **Note:** Run script to regenerate (takes ~5 minutes on full dataset)
 
 ---
@@ -127,11 +152,12 @@ df = pd.read_csv("mdl_gain_results.csv")
 top_cited = df.nlargest(10, 'in_degree')
 ```
 
-### Get premise co-occurrences:
+### Get theorem co-occurrence patterns (crystallization):
 ```python
-# Run crystallization analysis
+# Run crystallization analysis (finds theorems cited together frequently)
 !python 03_crystallization_analysis.py
 # Results printed to console + figure saved to figs/
+# Note: "premise co-occurrence" = theorems appearing together as dependencies
 ```
 
 ---
