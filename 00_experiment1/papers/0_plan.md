@@ -515,3 +515,73 @@ Massive speedup due to:
 **Repository:** https://github.com/chowdhary-sandeep/LEAN-experiments
 **Commit:** 221c478 (2026-02-07)
 
+
+
+---
+
+## IMPORTANT CORRECTION: Crystallization Concept (2026-02-08)
+
+**Previous Experiment 4 was MISLABELED** - it measured tactic pattern redundancy, not true crystallization.
+
+### What Was Wrong:
+- **Experiment 4 (labeled "Pattern Abstraction/Crystallized Lemmas")** analyzed tactic n-grams
+- Found patterns like "have -> have -> have" (611 occurrences)
+- Saved 81,727 tactics total
+- **This measures proof style redundancy, NOT crystallization**
+
+### What Is Correct (New Analysis):
+- **True Crystallization** = premise co-occurrence in theorem-premise DAG
+- Finds premise sets like `{mul_assoc, mul_comm}` used together in 307 theorems
+- Saves 2,704,146 premise references (33x more!)
+- **This measures mathematical abstraction potential**
+
+### Corrected Results:
+
+**Crystallization Analysis (Premise Co-Occurrence):**
+- Script: `03_crystallization_analysis.py`
+- Method: Mine frequent itemsets from theorem-premise DAG
+- Found: 1,690,033 crystallization candidates
+- Total savings: 2,704,146 premise references
+
+**Top 5 True Crystallization Candidates:**
+1. `{mul_assoc, mul_comm}` - 307 theorems, 305 refs saved (algebra)
+2. `{config, contextual, true}` - 145 theorems, 287 refs saved
+3. `{inl, inr}` - 287 theorems, 285 refs saved (type theory)
+4. `{lift, to}` - 239 theorems, 237 refs saved
+5. `{config, true}` - 236 theorems, 234 refs saved
+
+These represent fundamental mathematical patterns that could be abstracted into new lemmas.
+
+### What This Means:
+
+**Tactic patterns (Experiment 4):**
+- Measures how proofs are written (style)
+- Small impact: 81,727 tactics
+- Useful for proof automation/suggestion
+
+**Premise co-occurrence (True Crystallization):**
+- Measures what theorems prove (content)
+- Large impact: 2,704,146 premise refs
+- Useful for discovering new abstraction opportunities
+
+### Files Affected:
+- ❌ Removed: `figs/experiment4_pattern_mining.png` (wrong concept)
+- ❌ Removed: `figs/FINAL_SUMMARY.png/pdf` (included wrong Experiment 4)
+- ✅ Correct: `figs/crystallization_premise_cooccurrence.png` (true crystallization)
+
+### Updated Interpretation:
+
+The **2.7M premise reference savings** from true crystallization represents significant abstraction potential - much larger than the 2.1% headroom we found from frequency encoding.
+
+However, many of these co-occurrences may already be abstracted in Mathlib through:
+- Implicit type class resolution (e.g., `mul_comm` + `mul_assoc` via `CommMonoid`)
+- Tactic automation (e.g., `ring` implicitly uses multiple algebraic laws)
+- Library design (existing lemmas already combine common patterns)
+
+**Next step:** Investigate whether top crystallization candidates are already implicitly handled by Mathlib's type class system or if they represent genuine missed abstraction opportunities.
+
+---
+
+**Updated:** 2026-02-08  
+**Status:** Crystallization concept corrected, analysis complete
+
