@@ -536,7 +536,8 @@ memory_results = []
 
 for K, label in zip(memory_sizes, memory_labels):
     print(f"  Memory size K={label}...")
-    coverage = discover_with_memory(axioms, K, max_steps=100000)
+    # Reduced timestep budget for efficiency (was 100000)
+    coverage = discover_with_memory(axioms, K, max_steps=10000)
     memory_results.append({'memory_size': K, 'memory_label': label, 'coverage': coverage})
     print(f"    Coverage: {coverage:.3f}")
 
