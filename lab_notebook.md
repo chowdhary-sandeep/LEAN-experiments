@@ -618,3 +618,14 @@ Cases fixed: `dense_pi`, `Submodule.fg_pi`, `PiLp.norm_eq_of_L2`, `Real.volume_I
 
 **SOTA: 90.6% sequential 500, 84.4% random 500, 87.7% full 1000. Target (80%) exceeded on all test sets.**
 
+### Held-Out Evaluation (3× Random 1000)
+
+| Run | Pass | Rate |
+|-----|------|------|
+| Run 33 (random 1000, seed A) | 840/1000 | 84.0% |
+| Run 34 (random 1000, seed B) | 837/1000 | 83.7% |
+| Run 35 (random 1000, seed C) | 826/1000 | 82.6% |
+| **Mean ± std** | **834 ± 7** | **83.4% ± 0.6pp** |
+
+Consistent ~83-84% on truly random held-out sets. Sequential 500 is ~7pp higher (easier theorems). All results exceed the 80% target.
+
