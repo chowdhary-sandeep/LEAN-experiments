@@ -1,732 +1,386 @@
 # LeanATP Harness — Master Reference
 
-> **Project:** Meta-methods for discovering new mathematics via Lean 4 proof verification.
-> **Author notes:** Kyle McCleary's `breadboard` repo reimplements Harmonic's ATP architecture.
-> This document is the single reference for everything: how checking works, what we built,
-> what Kyle's new branch adds, and all design decisions made so far.
+> Project: Meta-methods for discovering new mathematics via Lean 4 proof verification.
+> Kyle McCleary's `breadboard` repo reimplements Harmonic's ATP architecture. We built the missing subprocess backend and parallel pool.
 
 ---
 
-## Table of Contents
+## 1. Breadboard Overview
 
-1. [What Breadboard Is](#1-what-breadboard-is)
-2. [How Lean Proof Checking Works — The Three Layers](#2-how-lean-proof-checking-works)
-3. [Firecracker Snapshots — Deep Dive](#3-firecracker-snapshots--deep-dive)
-4. [VM Infrastructure — What Exists vs What Was Missing](#4-vm-infrastructure)
-5. [WSL2 + Firecracker — What This Machine Can Do](#5-wsl2--firecracker)
-6. [What We Built — The Subprocess Verifier](#6-what-we-built--the-subprocess-verifier)
-7. [Kyle's New Branch — Snapshot Scripts + Full Stack](#7-kyles-new-branch)
-8. [Parallelism Plan](#8-parallelism-plan)
-9. [Corpus Test Results + Failure Analysis](#9-corpus-test-results)
-10. [Proof Verification Design Decisions](#10-proof-verification-design-decisions)
+Agentic coding + ATP harness. Exposes Lean 4 REPL via HTTP, backed by Firecracker snapshots. Runs EvoLake batch campaigns. Modeled on Harmonic's architecture.
 
----
+**We do NOT use the HTTP API** — we bypass it and call the REPL subprocess directly.
 
-## 1. What Breadboard Is
+| Component | File | Purpose |
+|---|---|---|
+| REPL interface | `breadboard/lean_repl.py` | `CheckRequest`, `CheckResult`, `FirecrackerReplService` |
+| HTTP API | `api/cli_bridge/atp_router.py` | `POST /atp/v1/repl`, `/atp/v1/repl/batch` |
+| EvoLake campaigns | `breadboard_ext/evolake/` | Multi-round batch ATP with checkpointing |
+| Sandbox backends | `breadboard/sandbox*.py` | Docker / gVisor / Firecracker — swappable |
 
-`breadboard` is an **agentic coding + automated theorem proving harness framework**. Primary purposes:
-
-1. Wrap AI coding agents (Claude Code, Codex, OpenCode) in a controllable evaluation harness
-2. Expose a **Lean 4 REPL service** via HTTP, backed by Firecracker microVM snapshots
-3. Run structured **campaigns** of ATP proof-checking at scale with metrics and checkpointing
-4. Serve as an evaluation platform ("E4") comparing agent behavior across models/versions
-
-The Lean ATP subsystem is modeled on Harmonic's architecture (harmonic.fun — AI for Formal Mathematical Reasoning).
-
-### Key Components
-
-
-| Component           | File                                | Purpose                                                                                       |
-| ------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------- |
-| Core REPL interface | `breadboard/lean_repl.py`           | Data contracts: `CheckRequest`, `CheckResult`, `LeanError`, `Sorry`, `FirecrackerReplService` |
-| ATP HTTP API        | `api/cli_bridge/atp_router.py`      | `POST /atp/v1/repl`, `/atp/v1/repl/batch`                                                     |
-| Service layer       | `api/cli_bridge/service.py`         | Wires request → backend → response                                                            |
-| Diagnostics         | `api/cli_bridge/atp_diagnostics.py` | Machine error codes + remediation                                                             |
-| EvoLake campaigns   | `breadboard_ext/evolake/`           | Multi-round batch ATP with checkpointing                                                      |
-| Sandbox backends    | `breadboard/sandbox*.py`            | Docker / gVisor / Firecracker — swappable                                                     |
-| ATP scripts         | `scripts/atp_*.py/sh`               | Benchmarks, stability, nightly CI                                                             |
-
-
-### HTTP API
-
+**HTTP API shape** (for reference — not used by us):
 ```json
 POST /atp/v1/repl
-{
-  "commands": ["theorem foo : 1+1=2 := by decide"],
-  "state_ref": "<optional cached state>",
-  "timeout_s": 30.0,
-  "want_state": true
-}
-
-Response:
-{
-  "success": true,
-  "errors": [],
-  "sorries": [],
-  "new_state_ref": "abc123",
-  "metrics": [{"repl_ms": 45, "restore_ms": 12}]
-}
+{"commands": ["theorem foo..."], "state_ref": "...", "timeout_s": 30.0, "want_state": true}
+→ {"success": true, "errors": [], "sorries": [], "new_state_ref": "abc123", "metrics": [...]}
 ```
 
-### EvoLake Campaign Loop
+**EvoLake loop:** Generate candidates → ATP batch → collect sorry goals → LLM fills gaps → verify → repeat with checkpointing.
 
-```
-Round 0: Generate N theorem candidates via LLM
-Round 1: Submit all to ATP batch, collect sorry goals
-Round 2: Use sorry goals as new LLM prompts to find missing lemmas
-Round 3: Verify augmented proofs
-... repeat with checkpointing
-```
-
-### What Breadboard Does NOT Provide
-
-
-| Gap                           | What you add                                |
-| ----------------------------- | ------------------------------------------- |
-| Theorem generator             | LLM / search / mutation layer               |
-| Premise retrieval             | Integrate separately (LeanDojo has this)    |
-| LLM-in-the-loop               | You orchestrate; breadboard is the verifier |
-| `FirecrackerReplService` impl | Was a stub — we built it (see §6)           |
-
+**What breadboard does NOT provide:** theorem generator, premise retrieval, LLM-in-the-loop, `FirecrackerReplService` implementation (was a stub — we built it).
 
 ---
 
 ## 2. How Lean Proof Checking Works
 
-### The Core Problem
+**Problem:** `import Mathlib` = ~100k definitions, 60s+ cold start. 1000 proofs × 60s = 16hrs. Unusable.
 
-`import Mathlib` forces Lean to elaborate ~100,000+ definitions. Cold start: **3–10+ minutes**.
-Re-running this per proof candidate is catastrophic for any iterative search loop.
+| Layer | Mechanism | Cost |
+|---|---|---|
+| Naive | `lean myfile.lean` — loads .olean, checks, exits | 60s per proof |
+| **REPL** (what we use) | Persistent process, JSON over stdin/stdout, state branching | 60s once, then 6–220ms |
+| Firecracker | Freeze RAM to disk, restore in ~200ms, discard VM after | ~200ms restore + ~380ms repl |
 
-### Layer 1 — Naive (Don't Do This)
-
+**REPL protocol (LeanDojo `Lean4Repl.lean`):**
 ```
-lean myfile.lean
-  → loads every .olean in Mathlib (~60s minimum)
-  → elaborates your theorem
-  → exits
+Send:    {"sid": N, "cmd": "..."}
+Receive: {"sid": N+1, "error": null}
 ```
+State IDs are branching handles. `import Mathlib` once → sid=1. All 1000 theorem checks branch from sid=1. Mathlib loaded **once per process lifetime**.
 
-For 1000 candidates: 1000 × 60s = 16 hours. Useless.
-
-### Layer 2 — The REPL Protocol
-
-Run a **persistent Lean process** holding the elaborated environment in memory.
-LeanDojo's `Lean4Repl.lean` implements this via `#lean_dojo_repl`:
-
-```
-Python                  Lean Process (running, Mathlib in memory)
-  │                              │
-  │  {"sid":0,"cmd":"..."}       │  ← JSON over stdin
-  │ ─────────────────────────►  │
-  │                              │
-  │  ◄─────────────────────────  │  ← JSON over stdout
-  │  {"sid":1,"error":null}      │
-```
-
-**State IDs are the key.** Each command produces a new sid. You can branch from any saved sid:
-
-- Import Mathlib once: sid 0 → sid 1
-- Check 1000 theorems: all branch from sid 1
-- Mathlib is loaded **once per process lifetime**
-
-`state_ref` in the breadboard harness maps directly to a sid (or snapshot ID in the Firecracker path).
-
-### Layer 3 — Firecracker Snapshots
-
-Solves: crash recovery, true parallelism, security isolation.
-
-```
-SETUP (once, offline):
-  Boot microVM → run Lean → import Mathlib → SNAPSHOT
-  Saves: lean.snap (CPU state) + lean.mem (full RAM image)
-
-RUNTIME (per request, ~200ms):
-  Restore snapshot → VM live with Mathlib already loaded
-  Send theorem via vsock → get result → discard VM
-```
-
-`restore_ms` in `FirecrackerReplMetrics` = step 1. `repl_ms` = step 2.
-SLA target: **p95 < 200ms total**.
-
-### What `state_ref` Actually Is
-
-In the subprocess path: an integer (the REPL sid).
-In the Firecracker path: a snapshot file name on disk.
-
-```
-"lean_mathlib_base"     →  snapshot after import Mathlib
-"lean_mathlib_branch_A" →  snapshot after import Mathlib + your lemmas
-"lean_mathlib_branch_B" →  snapshot after import Mathlib + different lemmas
-```
-
-`want_state: true` → "save the current state as a new snapshot, give me the ID."
+`state_ref` in breadboard = sid integer (subprocess path) or snapshot filename (Firecracker path).
 
 ---
 
-## 3. Firecracker Snapshots — Deep Dive
+## 3. Firecracker Snapshots
 
-### What Firecracker Is
+Boots miniature Linux VM in ~125ms (Amazon open-source, runs locally, no cloud). Communicates via **vsock** (AF_VSOCK port 52).
 
-Open-source Amazon tool (used inside AWS Lambda). Boots a miniature Linux VM in ~125ms.
-**Fully local** — runs on your own machine. Not a cloud service.
+**Snapshot = frozen RAM image.** Restore = un-pause. No reboot, no reimport.
 
-Minimal VM: CPU + RAM + tiny kernel. No GPU, no USB, no graphics.
-Communicates with host via **vsock** (virtio socket — like a network socket but zero TCP overhead).
+| | Docker | Firecracker |
+|---|---|---|
+| Isolation | Process-level | Full VM (separate kernel) |
+| Memory snapshot | No | Yes — full RAM frozen |
+| Restore | Must re-run `import Mathlib` | ~12–200ms |
+| Security | Weaker | Strong |
 
-### What a Snapshot Is
-
-```
-VM running, Lean loaded, Mathlib in memory
-    │
-    │  "take snapshot"
-    ▼
-[frozen memory image saved to disk]
-  - every byte of RAM written to lean.mem
-  - CPU register state saved to lean.snap
-  - VM paused
-```
-
-Restoring is **not rebooting**. It's un-pausing. OS doesn't boot. Lean doesn't start.
-Mathlib is not reloaded. Everything resumes exactly where it was frozen.
-
-### Why Not Docker?
-
-
-|                       | Docker                             | Firecracker                  |
-| --------------------- | ---------------------------------- | ---------------------------- |
-| Isolation             | Process-level (shared kernel)      | Full VM (separate kernel)    |
-| Memory snapshot       | No                                 | Yes — full RAM frozen        |
-| Restore from snapshot | N/A — must re-run `import Mathlib` | ~12–200ms                    |
-| Boot time             | ~500ms–2s                          | ~125ms                       |
-| Concurrent workers    | Easy                               | One snapshot file per worker |
-| Security              | Weaker                             | Strong (separate kernel)     |
-
-
-For proof search at scale, Docker means re-importing Mathlib every container spin-up.
-Firecracker means you never pay that cost again.
-
-### The vsock Protocol (Kyle's Full Stack)
-
-Kyle's system uses a versioned envelope over vsock:
-
+**Kyle's vsock envelope:**
 ```json
-// Host → VM
-{"type": "repl", "version": 1, "payload": {"command": "theorem foo ...", "timeout": 60.0}}
-
-// VM → Host
-{"type": "repl_response", "version": 1, "response": {"sid": 1, "error": null}}
+{"type": "repl", "version": 1, "payload": {"command": "theorem foo...", "timeout": 60.0}}
+→ {"type": "repl_response", "version": 1, "response": {"sid": 1, "error": null}}
 ```
-
-With a handshake:
-
-```json
-// Host → VM
-{"type": "hello", "version": 1, "capabilities": {}}
-// VM → Host
-{"type": "hello_ack", "version": 1, "capabilities": {}}
-```
-
-This is defined in `breadboard/vsock_protocol.py` (Kyle's new branch).
+Handshake: `hello` / `hello_ack`. Defined in `breadboard/vsock_protocol.py`.
 
 ---
 
-## 4. VM Infrastructure
-
-### What Was in the Repo vs What Was Missing (Before Kyle's Branch)
+## 4. Architecture — What Exists vs What We Added
 
 ```
-IN THE REPO
-───────────
-✓ HTTP API (FastAPI routes, request/response models)
-✓ Data contracts (CheckRequest, CheckResult, LeanError, Sorry)
-✓ Service layer wiring
-✓ Diagnostic error mapping
-✓ Benchmark and stability scripts
-✓ EvoLake campaign orchestration
-
-NOT IN THE REPO (original)
-──────────────────────────
-✗ Code that starts a Firecracker VM
-✗ Code that manages snapshot files
-✗ Code that sends commands into a VM
-✗ Dockerfile or VM image with Lean installed
-✗ The Lean REPL binary that runs inside the VM
-✗ vsock transport layer
-✗ Snapshot pool manager
+┌───────────────────────────────────────────────────────┐
+│  HTTP API / Service / EvoLake / Diagnostics / Models  │  ← IN BREADBOARD REPO
+├───────────────────────────────────────────────────────┤
+│  FirecrackerReplService  (seam / interface)           │  ← WE IMPLEMENTED THIS
+├───────────────────────────────────────────────────────┤
+│  VM Management / Snapshot Pool / vsock Transport      │  ← KYLE'S NEW BRANCH
+│  VM Image (Lean+Mathlib) / REPL Binary                │  ← KYLE'S SCRIPTS BUILD
+│  Firecracker Binary / Linux Host With KVM             │  ← WSL2 provides KVM
+└───────────────────────────────────────────────────────┘
 ```
 
-Kyle's `FirecrackerReplService` stub raised `NotImplementedError`. We filled it with
-a subprocess backend (§6). Kyle's new branch adds the Firecracker scripts (§7).
-
-### Architecture Diagram
-
-```
-┌─────────────────────────────────────────────────────┐
-│  HTTP API / Service Layer / Campaign Orchestration  │  ← IN REPO
-│  (atp_router, service, evolake, models, diagnostics)│
-├─────────────────────────────────────────────────────┤
-│  FirecrackerReplService  (seam)                     │  ← WE FILLED THIS
-├─────────────────────────────────────────────────────┤
-│  VM Management / Snapshot Pool / vsock Transport    │  ← KYLE'S NEW BRANCH
-│  VM Image With Lean+Mathlib / REPL Binary           │  ← KYLE'S SCRIPTS BUILD THIS
-│  Firecracker Binary / Linux Host With KVM           │  ← WSL2 (§5)
-└─────────────────────────────────────────────────────┘
-```
+**Original breadboard gaps** (before Kyle's branch): no VM start code, no snapshot management, no vsock transport, no VM image with Lean, no snapshot pool. `FirecrackerReplService` raised `NotImplementedError`.
 
 ---
 
-## 5. WSL2 + Firecracker
+## 5. WSL2 Environment
 
-### Environment
+| Item | Status |
+|---|---|
+| WSL2 (Ubuntu 24.04, kernel 6.6.87) | Available |
+| `/dev/kvm` | EXISTS ✓ (Hyper-V KVM passthrough) |
+| kvm group membership | Missing — `sudo usermod -aG kvm $USER && wsl --shutdown` |
+| Firecracker binary | Not installed |
+| VM kernel (`vmlinux`) | Not present |
+| VM rootfs with Lean+Mathlib | Kyle's script builds it |
+| Snapshot pool manager | Kyle's `build_lean_snapshot_pool.sh` |
 
-```
-WSL Version:    2.6.3.0
-WSL Kernel:     6.6.87.2-microsoft-standard-WSL2
-Distro:         Ubuntu 24.04 LTS
-/dev/kvm:       EXISTS ✓
-Firecracker:    NOT installed yet
-User in kvm group: NO (fix: sudo usermod -aG kvm $USER + wsl --shutdown)
-```
-
-`/dev/kvm` exists because WSL2 is a real Hyper-V VM with KVM passthrough (nested virtualization):
-
-```
-Windows 11
-    └── Hyper-V
-            ├── Windows
-            └── WSL2 VM (Ubuntu 24.04)
-                    └── Firecracker (nested KVM)
-                            └── Lean microVM
-```
-
-Three levels deep. Works — hardware-accelerated KVM means nested virtualization is viable.
-Restore times will be 50–400ms instead of 12–200ms bare metal. Still fine.
-
-### What's Still Needed for Full Firecracker Path
-
-
-| Piece                         | Status                                                    |
-| ----------------------------- | --------------------------------------------------------- |
-| Linux host with KVM           | **AVAILABLE** via WSL2 (just needs kvm group)             |
-| Firecracker binary            | Not installed — `apt install` or download                 |
-| VM kernel (`vmlinux`)         | Not present — download from Firecracker releases          |
-| VM rootfs with Lean+Mathlib   | Kyle's script builds this                                 |
-| Snapshot creation             | Kyle's `fc_create_lean_snapshot_vsock.sh`                 |
-| `FirecrackerReplService` impl | We built subprocess version; full vsock version is Kyle's |
-| Snapshot pool manager         | Kyle's `build_lean_snapshot_pool.sh`                      |
-
+Nesting: Windows → Hyper-V → WSL2 VM → Firecracker → Lean microVM. Three levels, works fine. Restore times ~50–400ms vs 12–200ms bare metal.
 
 ---
 
-## 6. What We Built — The Subprocess Verifier
-
-### Architecture
+## 6. What We Built — Subprocess Verifier
 
 ```
 Your code / EvoLake
       │  CheckRequest → CheckResult
       ▼
-SubprocessReplService  (our implementation of FirecrackerReplService)
-      │  subprocess stdin/stdout
+SubprocessReplService  (our FirecrackerReplService implementation)
       │  {"sid": N, "cmd": "..."}  →  {"sid": N+1, "error": null}
       ▼
 lake env lean /tmp/lean_repl_entry.lean  (persistent process)
-      │  reads pre-built .olean from ~/.cache/lean_dojo/.../mathlib4/
       ▼
-Lean 4 kernel + Mathlib .olean (Lean v4.10.0-rc1)
+Lean 4 kernel + Mathlib .olean  (v4.10.0-rc1, ~/.cache/lean_dojo/...)
 ```
 
-### Files
-
+**Files:**
 ```
 verifier/
-  repl_client.py    ← LeanDojo CommandRepl subprocess client (core)
-  lean_runner.py    ← SubprocessReplService: FirecrackerReplService implementation
-  test_basic.py     ← 5 smoke tests
-  test_corpus.py    ← corpus batch verifier (150 random tactic proofs)
-  stage0.md         ← lab notebook (append-only)
+  repl_client.py   ← LeanReplClient, ReplSession, ReplPool (parallel)
+  lean_runner.py   ← SubprocessReplService + sorry detection
+  test_basic.py    ← 5 smoke tests (5/5 PASS)
+  test_corpus.py   ← corpus batch verifier, --workers N for parallel
+  stage0.md        ← lab notebook
 ```
 
-### Key Implementation Decisions
+**Key implementation details:**
 
--  ****
-- `**base_sid = 0`**: Mathlib is loaded via the entry file before the REPL even starts.
-The REPL is ready at sid=0, post-Mathlib. No `import Mathlib` command ever sent.
-- `**os.read(fd, 4096)**` for non-blocking stdout read — `.read1()` doesn't exist on `_io.FileIO`.
-- **elan PATH injected**: `env["PATH"] = f"{home}/.elan/bin:" + env.get("PATH", "")`.
-- **Sorry detection**: Lean emits sorry as a plain-text stdout WARNING, not in the JSON `error` field.
-`ReplResponse.stdout_lines` captures non-JSON output; `has_sorry` scans for "sorry".
-`lean_runner.py` checks `r.has_sorry` → appends `Sorry(...)`, sets `success=False`.
-- **STARTUP_TIMEOUT_S = 300s**: import Mathlib via /mnt/c/ 9P filesystem takes ~100s.
-Observed ~69s warm.
+| Decision | Detail |
+|---|---|
+| `base_sid = 0` | Mathlib loaded via entry file before REPL starts. No `import Mathlib` command sent. |
+| Sorry detection | Lean emits sorry as plain stdout WARNING, not JSON `error`. `has_sorry` scans `stdout_lines`. |
+| Non-blocking read | `os.read(fd, 4096)` — `.read1()` doesn't exist on `_io.FileIO` |
+| elan PATH | `env["PATH"] = f"{home}/.elan/bin:" + env.get("PATH", "")` |
+| Startup timeout | 300s — import Mathlib via /mnt/c/ 9P takes ~100s, observed ~69s warm |
 
-### Performance
+**Performance:**
 
+| Metric | Value |
+|---|---|
+| Mathlib cold load (once per session) | ~69s |
+| Simple proof (`decide`, `rfl`) | 6–10ms |
+| Medium tactic | 20–50ms |
+| Complex proof | 100–220ms |
 
-| Metric                                   | Value     |
-| ---------------------------------------- | --------- |
-| Mathlib cold load (one-time per session) | ~69s      |
-| Simple proof (`decide`, `rfl`)           | 6–10ms    |
-| Medium tactic proof                      | 20–50ms   |
-| Complex proof                            | 100–220ms |
-| Typical                                  | ~30–60ms  |
+**Trustworthy?** Yes — completely. The Lean kernel (CIC) is the judge. `error: null` = kernel-verified. No approximation. Same kernel as all 200k+ Mathlib theorems.
 
+### What a Theorem Needs to Verify Consistently
 
-### Smoke Test Results — 5/5 PASS
+Bare `statement + proof_text` fails ~80% — theorems are written inside their original file context. Must reconstruct:
 
+| Context | Source | Fixes |
+|---|---|---|
+| `variable {R : Type*} [CommRing R]` | `state_before`: parse everything above `⊢` | 53 `failed to synthesize` |
+| `open Polynomial` | `open_namespaces` field (see §9) or derive from `full_name` | 27 `unknown identifier` |
+| `open scoped BigOperators` | Scan proof for `∑`/`∏`/`‖x‖`/`x!` | 18 `expected token` |
+| `noncomputable section` | Always prepend, costs nothing | Several algebra failures |
+| Local helper defs | Preceding defs in same file — position data zeroed, hard | 5 `type mismatch` |
+
+**Reconstruction template:**
+```lean
+noncomputable section
+open scoped BigOperators   -- if ∑/∏ detected
+
+variable {R : Type*} [CommRing R]   -- from state_before
+
+namespace Polynomial
+open Polynomial
+private theorem coeff_mul_vt ... :=   -- _vt suffix avoids name collision
+  <proof_text>
+end Polynomial
+end
 ```
-TEST: Correct proof          PASS  (0.0s)
-TEST: Sorry detection        PASS  (0.0s)
-TEST: Type error             PASS  (0.0s)
-TEST: Incremental state_ref  PASS  (0.0s)  lemma proved at state_ref=4, theorem reuses it
-TEST: HahnSeries C_ne_zero   PASS  (0.0s)
-```
 
-### Is It Trustworthy?
+**Pass rate progression:**
 
-Yes — completely. The Lean kernel (not us) is the judge. It implements the Calculus of
-Inductive Constructions. When Lean returns `error: null`, the proof is kernel-verified.
-There is no approximation, no heuristic. It either type-checks or it doesn't.
-Same kernel that verifies all 200k+ Mathlib theorems.
+| Fix | Rate |
+|---|---|
+| Bare statement | ~3% |
+| `private` rename + namespace wrap | 20% |
+| + `open X` | ~28% |
+| + `variable` from `state_before` | ~55% |
+| + `open scoped` from symbol scan | ~60% |
+| + `noncomputable` | ~62% |
+| Ceiling (collision limit) | ~90–95% |
+
+Ceiling is not 100%: `import Mathlib` pre-loads all Mathlib names. Re-declaring hits `already been declared` regardless. Only affects Mode 1 (corpus re-verification). Modes 2+3 are ~99–100%.
 
 ---
 
 ## 7. Kyle's New Branch
 
 **Branch:** `origin/codex/atp-lean-ship-20260307`
-**Fetched:** 2026-03-08
 
-### What's New
+| File | Purpose |
+|---|---|
+| `scripts/lean_snapshot/fc_create_lean_snapshot_vsock.sh` | 1381-line Firecracker snapshot builder |
+| `scripts/lean_snapshot/build_lean_snapshot_pool.sh` | Builds N snapshots for concurrency |
+| `scripts/lean_snapshot/activate_lean_snapshot.sh` | Exports env vars, runs ATP CI checks |
+| `breadboard/vsock_protocol.py` | Envelope protocol helpers |
+| `docs/atp_runbook.md` | Operational runbook |
 
-```
-scripts/lean_snapshot/
-  fc_create_lean_snapshot_vsock.sh     ← 1381-line Firecracker snapshot builder
-  activate_lean_snapshot.sh            ← exports env vars, runs ATP CI checks
-  build_lean_snapshot_pool.sh          ← builds N snapshots for concurrency
-  run_lean_snapshot_diag.sh            ← quick diagnostic build
-  run_lean_snapshot_diag_stable.sh     ← stable diagnostic
+**`fc_create_lean_snapshot_vsock.sh` flow:** rootfs + vmlinux → boot VM (8GB/4vCPU) → build Lean4Repl → wait for Mathlib warm → snapshot → `lean.snap` + `lean.mem`.
 
-breadboard/vsock_protocol.py           ← envelope protocol helpers
-docs/atp_runbook.md                    ← operational runbook
-docs/ATP_VSOCK_PROTOCOL_POLICY.md      ← wire contract spec
-```
+**Kyle vs us:**
 
-### What `fc_create_lean_snapshot_vsock.sh` Does
+| Layer | Kyle | Us | Compatible? |
+|---|---|---|---|
+| Interface | `FirecrackerReplService` | Same | YES |
+| Lean protocol | LeanDojo CommandRepl | Same, direct | YES |
+| Transport | vsock (AF_VSOCK:52) | subprocess stdin/stdout | Different, transparent |
+| Isolation | Firecracker VM | Single process | Different |
+| Cold start | ~200ms per restore | ~69s once | Different tradeoff |
 
-1. Takes a pre-existing rootfs (`lean-mathlib.ext4`) + kernel (`vmlinux`)
-2. Boots Firecracker VM (8GB RAM, 4 vCPUs)
-3. Mounts the rootfs, runs `chroot` to build Lean4Repl binary
-4. Starts VM, inside: checks for existing `.olean` files, optionally runs `lake build`
-5. Waits for REPL to warm (import Mathlib)
-6. Takes Firecracker snapshot → `lean.snap` + `lean.mem`
-7. Output: ready-to-restore snapshot directory
+**Performance:**
 
-### Are We Using His Work The Way It's Intended?
+| Metric | Ours | Kyle's Firecracker |
+|---|---|---|
+| Cold start | 69s once | ~200ms per restore |
+| Per-check | 6–220ms | ~380ms avg |
+| Parallelism | ReplPool (N subprocesses) | VM pool |
 
+**Shortcutting the 2-hour build:** `SKIP_LAKE_BUILD_IF_PRESENT=1` is the **default** in the script — it checks for existing `Mathlib.olean` and skips `lake build`. Our LeanDojo cache has it.
 
-| Layer           | Kyle's design                                  | Our implementation         | Compatible?                       |
-| --------------- | ---------------------------------------------- | -------------------------- | --------------------------------- |
-| API contract    | `FirecrackerReplService` interface             | Same interface             | YES                               |
-| Lean protocol   | LeanDojo CommandRepl (`{"sid":N,"cmd":"..."}`) | Same protocol, direct      | YES                               |
-| Transport       | vsock (AF_VSOCK port 52)                       | subprocess stdin/stdout    | Different, transparent to callers |
-| Isolation       | Firecracker microVM                            | Single persistent process  | Different                         |
-| Restore latency | ~200ms                                         | ~69s cold (once), then 0ms | Different tradeoff                |
+Plan: build rootfs (~1hr) → copy .olean cache into data.ext4 (~10min) → run script (~30min) = **~1hr total vs 2hrs**.
 
+Also: `mathlib_env.olean` pickle — first run saves it automatically. Subsequent snapshot builds load pickle (~5s vs 70s reimport).
 
-**We implement the right interface and use the same leaf protocol. We skip the isolation layer.**
-For sequential single-agent ATP, our approach is faster per-check. His is for parallel/production.
+---
 
-### Performance Comparison
+## 8. Parallelism
 
+**Implemented:** `ReplPool` in `repl_client.py`.
 
-| Metric          | Our approach             | Firecracker approach               |
-| --------------- | ------------------------ | ---------------------------------- |
-| Cold start      | **69s** once per session | **~200ms** per VM restore          |
-| Per-check       | **6–220ms**              | **~380ms** avg (measured baseline) |
-| Concurrency     | Serial (1 REPL)          | Parallel VM pool                   |
-| Isolation       | None                     | Full kernel                        |
-| State branching | Via `sid` (tree)         | Via `state_ref` (CAS snapshots)    |
-
-
-### Shortcutting the 2-Hour Build
-
-The script's expensive step is `lake build` (compiling all of Mathlib). We already have
-the compiled output. The script explicitly skips it when present:
+**Option A — Subprocess pool (done):** N `LeanReplClient` processes, all boot in parallel (~70s regardless of N). Thread-safe `queue.Queue` dispatch. OS deduplicates read-only `.olean` pages — N=4 workers ≈ **10–14GB RAM**, not 4×8GB.
 
 ```bash
-# Inside the VM guest init:
-if [ -f /root/mathlib4/.lake/build/lib/Mathlib.olean ]; then
-  BUILD_PRESENT=1
-fi
-if [ "$SKIP_LAKE_BUILD_IF_PRESENT" = "1" ] && [ "$BUILD_PRESENT" = "1" ]; then
-  log "Skipping lake build (Mathlib.olean already present)"
-fi
+python test_corpus.py --count 100 --workers 4
 ```
 
-`SKIP_LAKE_BUILD_IF_PRESENT=1` is the **default**. Our LeanDojo cache eliminates the 2-hour step.
-
-**Shortcut plan:**
-
-1. Build minimal rootfs (Ubuntu + elan + Lean v4.10.0-rc1) — ~1hr
-2. Copy our .olean cache into the data disk — ~10min:
-  ```bash
-   dd if=/dev/zero of=data.ext4 bs=1M count=24576 && mkfs.ext4 data.ext4
-   mount data.ext4 /mnt/tmp
-   cp -a ~/.cache/lean_dojo/.../mathlib4/.lake/. /mnt/tmp/.lake/
-   umount /mnt/tmp
-  ```
-3. Run script with SKIP_LAKE_BUILD_IF_PRESENT=1 (default) — ~30min
-4. **Total: ~1hr vs 2hrs**
-
-The script also supports `mathlib_env.olean` pickle (precomputed Lean environment).
-First run generates it automatically (`pickle_after_import=1` is default).
-Subsequent snapshot builds from same rootfs load pickle instead of re-importing (~5s vs 70s).
+**Option B — Firecracker pool (upgrade path):** Kyle's `build_lean_snapshot_pool.sh` builds N snapshot dirs. Use when: untrusted AI code from multiple agents, clean-state guarantees, production/multi-tenant. Not needed now.
 
 ---
 
-## 8. Parallelism Plan
+## 9. Corpus Test Data — Key Finding
 
-### Why We Need It
+**We were testing against the wrong file.** `_app_data_creater.py` deliberately stripped fields for a web dashboard:
 
-EvoLake batch campaigns require parallel proof checking. Right now: one Lean process,
-one check at a time, fully sequential.
+| File | Fields | `open_namespaces`? | `state_before` |
+|---|---|---|---|
+| `app_network_data.jsonl` (what we used) | `full_name`, `statement`, `proof_text`, `tactics` | **NO — stripped** | **Truncated to 150 chars** |
+| `traced_theorems_unified_v2.jsonl` (use this) | All above + `file`, `namespace`, `open_namespaces` | **YES** | Full, untruncated |
 
-### Option A — Subprocess Pool (implement now, no new infra)
+**`traced_theorems_unified_v2.jsonl` location:** `E:\LEAN-experiments\00_experiment1\jsons\` (126,792 entries, 54,477 tactic proofs)
 
-Spawn N `LeanReplClient` processes concurrently. Each loads Mathlib independently.
-Dispatch checks from a thread-safe queue.
+**`corpus_code_index.json`:** Built by `00_corpus_to_code.py` from `corpus.jsonl`. Maps `full_name → source_code` for **premises** (definitions used by theorems). 180,907 entries covering full Lean+Mathlib definition space. Not the theorems themselves.
 
+**`open_namespaces` example:**
+```json
+"open_namespaces": ["Mathlib", "Mathlib.RingTheory", "Mathlib.RingTheory.Polynomial", "Polynomial"]
 ```
-Worker 0  ──── base_sid=0 ────  check A  check E  check I ...
-Worker 1  ──── base_sid=0 ────  check B  check F  check J ...
-Worker 2  ──── base_sid=0 ────  check C  check G  check K ...
-Worker 3  ──── base_sid=0 ────  check D  check H  check L ...
-```
+Directly tells us which `open X` statements to emit. **Position data (`line`, `col`) is zeroed for all 126k entries** — LeanDojo tracing limitation, not stripping. Can't walk backward in source file for local helpers.
 
-All workers start concurrently → total warmup ≈ 70s (parallel, not N×70s).
-
-**Memory:** Lean memory-maps `.olean` files read-only. OS shares pages between processes.
-The ~8GB compiled Mathlib is mapped once at OS level. Each extra process adds ~1–2GB heap.
-N=4 workers ≈ **10–14GB total RAM**, not 4×8GB.
-
-**Implementation sketch (~80 lines in `repl_client.py`):**
-
+**Revised enriched context plan:**
 ```python
-class ReplPool:
-    def __init__(self, n_workers=4, **client_kwargs):
-        self._workers = [LeanReplClient(**client_kwargs) for _ in range(n_workers)]
-        self._queue = queue.Queue()
-
-    def start(self):
-        threads = [threading.Thread(target=w.start, daemon=True) for w in self._workers]
-        for t in threads: t.start()
-        for t in threads: t.join()      # all warm in parallel
-        for w in self._workers: self._queue.put(w)
-
-    def check(self, sid, cmd, timeout=None):
-        worker = self._queue.get()
-        try:
-            return worker.send(sid, cmd, timeout)
-        finally:
-            self._queue.put(worker)
+enriched = {}
+for entry in load_jsonl("traced_theorems_unified_v2.jsonl"):
+    if entry["proof_type"] != "tactic": continue
+    enriched[entry["full_name"]] = {
+        "open_namespaces": entry["open_namespaces"],
+        "state_before":    entry["tactics"][0]["state_before"] if entry["tactics"] else "",
+        "file":            entry["file"],
+        "namespace":       entry["namespace"],
+    }
+# Save as enriched_context.json (~20MB) — one-time preprocessing
 ```
 
-### Option B — Firecracker Pool (upgrade path)
+**Expected pass rates with traced file:**
 
-Kyle's `build_lean_snapshot_pool.sh` builds N independent snapshot directories.
-`FirecrackerReplService` pulls from the pool, restoring a fresh VM per batch.
-
-Needed when:
-
-- Running untrusted AI-generated proofs from multiple agents simultaneously
-- Reproducibility guarantees (clean state per check)
-- Multi-tenant or production deployment
-
-Not needed now for single-agent research loops.
+| Fix | Rate |
+|---|---|
+| Current (app_network_data.jsonl, private+namespace) | 20% |
+| Switch to traced file + `open_namespaces` | ~43% |
+| + `variable` from full `state_before` | ~70% |
+| + `open scoped` from symbol scan | ~77% |
+| + `noncomputable section` | ~79% |
 
 ---
 
-## 9. Corpus Test Results
+## 10. Corpus Test Results
 
-### Test Setup
+**Iteration history:**
 
-150 random tactic proofs from `app_network_data.jsonl` (54,477 tactic proofs total).
-Each proof submitted to the verifier cold (branching from `base_sid=0` post-Mathlib).
+| Run | Data | Sample | Approach | Pass | Rate |
+|---|---|---|---|---|---|
+| 1 | compact (seq) | 150 | Naive `theorem NAME` | 5/150 | 3.3% |
+| 2 | compact (seq) | 150 | `example` approach (broken) | 3/150 | 2% |
+| 3 | compact (seq) | 150 | `private _vt` + namespace wrap | 30/150 | **20%** |
+| 4 | compact (seq) | 500 | + `noncomputable section` + `open_namespaces` (no traced file) | 58/500 | 11.6% |
+| 5 | **traced (random)** | 500 | + traced file `open_namespaces` + 4 parallel workers | **80/500** | **16%** |
 
-### Results Across Three Iterations
+**Run 5 notes:**
+- Wall time: **9.3s for 500 checks** (4 workers = ~75ms avg per check)
+- Data: `traced_theorems_unified_v2.jsonl` — has full `open_namespaces`, untruncated `state_before`
+- Workers started with 4s stagger to avoid `lake env` file lock contention
+- Fixed: `select.select` → reader thread (Windows/WSL cross-platform fix)
+- Fixed: was sending `import Mathlib` as a command — entry file already imports it → `setup([])`
 
+**Run 5 failure breakdown (420 failures):**
 
-| Approach                                            | Pass       | Rate           |
-| --------------------------------------------------- | ---------- | -------------- |
-| Naive: `theorem NAME`                               | 5/150      | 3.3%           |
-| `example` approach (broken type extraction)         | 3/150      | 2% — abandoned |
-| `private theorem NAME_vt` + `namespace X ... end X` | **30/150** | **20%**        |
+| Error | Count | Cause | Next fix |
+|---|---|---|---|
+| `failed to synthesize` | 167 | Missing `variable` typeclass decls | Parse `state_before` above `⊢` |
+| `expected token` | 95 | Notation / syntax — open scoped missing or wrong | Better symbol scan |
+| Other | 75 | Various | — |
+| `unknown identifier` / `function expected` | 78 | Still needs more `open` | Already partially fixed |
+| `type mismatch` | 5 | Universe elaboration | Complex |
 
+**Why 16% vs 20% (run 3)?** Run 3 was first 150 sequential entries (easier theorems). Run 5 is random across all 54k — includes hard algebra clusters. The `open_namespaces` fix did help (unknown_identifier 45 vs 49, but `expected_token` 95 vs 64 — some regressions from the new open stmts adding conflicting names). Next big unlock: variable reconstruction from `state_before` (167 failures = 40% of all failures).
 
-### Why Most Fail — Root Causes
+**Three modes:**
 
-The corpus stores theorems as written **inside their original file context**. They assume:
+| Mode | Description | Ceiling |
+|---|---|---|
+| 1 | Re-prove existing Mathlib theorems (corpus test only) | ~90–95% |
+| 2 | Complete `sorry` in existing Lean file (main use case) | ~99%+ |
+| 3 | Prove novel theorem (new math) | ~100% |
 
-- `variable {R : Type*} [CommRing R] ...` declared at top of file
-- Being inside `namespace X`
-- `open` statements active
-- NOT having full Mathlib already imported (so re-declaring doesn't conflict)
+**Three modes:**
 
-
-| Category                                   | Count | Root Cause                                            | Fix                                 |
-| ------------------------------------------ | ----- | ----------------------------------------------------- | ----------------------------------- |
-| `failed to synthesize`                     | 53    | Missing `variable` typeclass decls from original file | Parse `tactics[0].state_before`     |
-| `function expected` / `unknown identifier` | 27    | Dot notation needs `open` or deeper namespace         | Add `open X` matching namespace     |
-| `expected token`                           | 18    | Notation requires `open` (unicode, factorial, etc.)   | Inferrable from failure + namespace |
-| `already been declared`                    | 7     | `@[simp]` before `theorem` blocks rename regex        | 2-line regex fix                    |
-| `application type mismatch`                | 5     | Proof depends on renamed lemmas                       | Complex                             |
-| Other                                      | 10    | Various                                               | —                                   |
-
-
-### Projected Pass Rate With Fixes
-
-
-| Fix                                        | New passes | Cumulative           |
-| ------------------------------------------ | ---------- | -------------------- |
-| Current                                    | 30         | 30/150 (20%)         |
-| Fix `@[simp]` regex                        | +7         | 37 (25%)             |
-| Add `open X` matching namespace            | +12        | 49 (33%)             |
-| Reconstruct `variable` from `state_before` | +40        | 89 (59%)             |
-| **Realistic ceiling**                      | —          | ~~**89/150 (~~60%)** |
-
-
-### Would Full Source File Context Give 100%?
-
-No — **~90–95% ceiling at best**. Here is why.
-
-When the REPL starts, `import Mathlib` is already executed. Every Mathlib theorem is already
-declared. Submitting the source file for `Nat.add_comm` still fails:
-
-```
-'Nat.add_comm' has already been declared
-```
-
-The source file works during `lake build` because it imports only its *dependencies*, not itself.
-Our REPL has everything loaded.
-
-**What full source context WOULD fix:**
-
-
-| Issue                                       | Fixed by source file?                    |
-| ------------------------------------------- | ---------------------------------------- |
-| `failed to synthesize` (missing `variable`) | YES                                      |
-| `unknown identifier` (needs `open`)         | YES                                      |
-| `expected token` (notation)                 | YES                                      |
-| `function expected` (dot notation)          | YES                                      |
-| `already been declared`                     | **NO** — collision with `import Mathlib` |
-
-
-### The Three Modes — Why This Only Matters for the Corpus Test
-
-**Mode 1: Re-proving existing Mathlib theorems (corpus test)**
-Ceiling ~90–95%. This is only for testing our verifier. Not our actual use case.
-
-**Mode 2: Completing a proof in an existing Lean file (main ATP use case)**
-Submit: file imports + variable decls + definitions before the theorem + AI proof.
-Nothing collides because the theorem is a `sorry` placeholder, not yet compiled.
-**Expected ceiling: ~99%+**
-
-**Mode 3: Proving a novel theorem (new math)**
-It's new — no collision possible.
-**Expected ceiling: 100%** for correctness of the verdict.
-
-**The corpus test limitations are irrelevant to our actual work.**
+| Mode | Description | Ceiling |
+|---|---|---|
+| 1 | Re-prove existing Mathlib theorems (corpus test only) | ~90–95% |
+| 2 | Complete `sorry` in existing Lean file (main use case) | ~99%+ |
+| 3 | Prove novel theorem (new math) | ~100% |
 
 ---
 
-## 10. Proof Verification Design Decisions
+## 11. Proof Verification Design Decisions
 
-### Re-proving Known Theorems — The Collision Problem
-
-If AI attempts to prove something with the same name as an existing Mathlib theorem:
-
-```
-error: 'Nat.add_comm' has already been declared
-```
-
-This is a **false negative** — the proof may be mathematically correct.
-
-**The fix — always use one of:**
-
-**Single theorem — use `example`** (anonymous, never collides):
+**Name collision fix — always wrap AI submissions:**
 
 ```lean
--- Don't submit:
-theorem Nat.add_comm (n m : ℕ) : n + m = m + n := by omega
--- Submit as:
-example (n m : ℕ) : n + m = m + n := by omega
-```
+-- Single theorem:
+example (n m : ℕ) : n + m = m + n := by omega   -- never collides
 
-**Multi-block with helpers — use unique namespace:**
-
-```lean
+-- Multi-lemma block:
 namespace ATPCheck_a3f9b2c1
 private lemma helper : ... := ...
 private theorem main : ... := by exact helper
 end ATPCheck_a3f9b2c1
+-- `private` → mangled internal name, never collides with Mathlib
 ```
 
-`private` inside a namespace gives Lean a mangled internal name (`_private.ATPCheck.helper.1`).
-Never collides with anything in Mathlib.
+`example` runs the exact same kernel judgment as `theorem`. Names are labels. Verdict identical.
 
-**Mathematical validity is unaffected.** `example` runs the exact same kernel judgment as `theorem`.
-Names are labels. The correctness verdict is identical.
-
-**Implementation:** ~20-line change to `_run_commands` in `lean_runner.py` — not yet done but straightforward.
-
-### Submission Strategy for ATP Loop
-
-- Pure "is this proof valid?" → `example : STATEMENT := PROOF`
+**Submission rules for ATP loop:**
+- Single proof → `example : STATEMENT := PROOF`
 - Multi-lemma block → `namespace ATPCheck_<uuid>` wrapping
-- Never submit AI-generated code without one of these
+- Never submit raw AI code without one of these (~20-line change to `lean_runner.py`, not yet done)
 
-### Targeted Import Mode (Future)
-
-The real power unlock: a REPL that imports only the modules a theorem needs, not all of Mathlib.
-This would:
-
-- Eliminate all name collision problems
-- Allow re-verification of existing Mathlib proofs during development
-- Enable "what if we changed this lemma?" counterfactuals
-
-LeanDojo's `sid` branching supports custom import trees. We need the dependency graph per theorem
-(which `corpus_code_index.json` has for premises).
+**Future — targeted import mode:** REPL that imports only what a theorem needs. Eliminates all collision problems. Enables re-verification of existing proofs, "what if we changed this lemma?" counterfactuals. LeanDojo `sid` branching supports it; need dependency graph per theorem (`corpus_code_index.json` has premises).
 
 ---
 
-## Appendix: Key Error Codes
+## Appendix
 
+**Error codes:**
 
-| Error Code                 | Meaning                               | Action                             |
-| -------------------------- | ------------------------------------- | ---------------------------------- |
-| `state_ref_not_found`      | Cached state expired/missing          | Re-run with `want_state=true`      |
-| `state_ref_incompatible`   | State from different Mathlib snapshot | Regenerate with matching toolchain |
-| `limit_timeout_exceeded`   | REPL timed out                        | Reduce `timeout_s`                 |
-| `protocol_mismatch`        | Firecracker envelope version mismatch | Rebuild snapshot                   |
-| `protocol_transport_error` | vsock/socket failure                  | Check Firecracker process health   |
+| Code | Meaning | Action |
+|---|---|---|
+| `state_ref_not_found` | Cached state expired | Re-run with `want_state=true` |
+| `state_ref_incompatible` | Different Mathlib snapshot | Regenerate with matching toolchain |
+| `limit_timeout_exceeded` | REPL timed out | Reduce `timeout_s` |
+| `protocol_mismatch` | Firecracker envelope version mismatch | Rebuild snapshot |
+| `protocol_transport_error` | vsock failure | Check Firecracker process |
 
-
-## Appendix: SLA Targets
-
-From `config/atp_threshold_policy.json`:
-
-```json
-{
-  "bench":        { "p95_ms_max": 200.0 },
-  "pool_stability": { "require_concurrency": 4, "min_runs": 3, "max_p95_ms": 200.0 },
-  "state_ref":    { "max_regression_pct": 10.0, "required_consecutive_pass": 2 }
-}
-```
-
-Measured baseline (Kyle's system, 2026-02-12):
-
-- `repl_ms_avg = 380ms`
-- `request_wall_s_p95 = 782ms`
-- Concurrency = 4 workers
-
+**SLA targets** (`config/atp_threshold_policy.json`): p95 < 200ms. Kyle's measured baseline: `repl_ms_avg=380ms`, `p95_wall=782ms`, concurrency=4.

@@ -1,0 +1,210 @@
+{
+  "n_candidates": 100,
+  "n_passing_found": 86,
+  "n_distorted": 20,
+  "detected": 20,
+  "missed": 0,
+  "soundness_rate": 1.0,
+  "results": [
+    {
+      "full_name": "RingQuot.eqvGen_rel_eq",
+      "proof_len": 797,
+      "distortion": "insert_symm",
+      "original_proof": "by\n  ext x₁ x₂\n  constructor\n  · intro h\n    induction h with\n    | rel _ _ h => induction h with\n      | of => exact RingConGen.Rel.of _ _ ‹_›\n      | add_left _ h => exact h.add (RingConGen.Rel.refl _)\n      | mul_left _ h => exact h.mul (RingConGen.Rel.refl _)\n      | mul_right _ h => exact (RingConGen.Rel.refl _).mul h\n    | refl => exact RingConGen.Rel.refl _\n    | symm => exact RingConGen.Rel.symm ‹_›\n    | trans => exact RingConGen.Rel.trans ‹_› ‹_›\n  · intro h\n    induction h with\n    | of => exact EqvGen.rel _ _ (Rel.of ‹_›)\n    | refl => exact (RingQuot.ringCon r).refl _\n    | symm => exact (RingQuot.ringCon r).symm ‹_›\n    | trans => exact (RingQuot.ringCon r).trans ‹_› ‹_›\n    | add => exact (RingQuot.ringCon r).add ‹_› ‹_›\n    | mul => exact (RingQuot.ringCon r).mul ‹_› ‹_›",
+      "distorted_proof": "by\n  ext x₁ x₂\n  constructor\n  · intro h\n    induction h with\n    | rel _ _ h => induction h with\n      | of => exact RingConGen.symm.Rel.of _ _ ‹_›\n      | add_left _ h => exact h.add (RingConGen.Rel.refl _)\n      | mul_left _ h => exact h.mul (RingConGen.Rel.refl _)\n      | mul_right _ h => exact (RingConGen.Rel.refl _).mul h\n    | refl => exact RingConGen.Rel.refl _\n    | symm => exact RingConGen.Rel.symm ‹_›\n    | trans => exact RingConGen.Rel.trans ‹_› ‹_›\n  · intro h\n    induction h with\n    | of => exact EqvGen.rel _ _ (Rel.of ‹_›)\n    | refl => exact (RingQuot.ringCon r).refl _\n    | symm => exact (RingQuot.ringCon r).symm ‹_›\n    | trans => exact (RingQuot.ringCon r).trans ‹_› ‹_›\n    | add => exact (RingQuot.ringCon r).add ‹_› ‹_›\n    | mul => exact (RingQuot.ringCon r).mul ‹_› ‹_›",
+      "verifier_verdict": "fail:unknown identifier 'RingConGen.symm.Rel.of'",
+      "outcome": "DETECTED",
+      "error_message": "unknown identifier 'RingConGen.symm.Rel.of'"
+    },
+    {
+      "full_name": "SSet.horn.hom_ext",
+      "proof_len": 747,
+      "distortion": "flip_field_1_2",
+      "original_proof": "by\n  apply NatTrans.ext; apply funext; apply Opposite.rec; apply SimplexCategory.rec\n  intro m; ext f\n  obtain ⟨f', hf⟩ := (standardSimplex.objEquiv _ _).symm.surjective f.1\n  obtain ⟨j, hji, hfj⟩ : ∃ j, ¬j = i ∧ ∀ k, f'.toOrderHom k ≠ j := by\n    obtain ⟨f, hf'⟩ := f\n    subst hf\n    simpa [← Set.univ_subset_iff, Set.subset_def, asOrderHom, not_or] using hf'\n  have H : f = (Λ[n+1, i].map (factor_δ f' j).op) (face i j hji) := by\n    apply Subtype.ext\n    apply (standardSimplex.objEquiv _ _).injective\n    rw [← hf]\n    exact (factor_δ_spec f' j hfj).symm\n  have H₁ := congrFun (σ₁.naturality (factor_δ f' j).op) (face i j hji)\n  have H₂ := congrFun (σ₂.naturality (factor_δ f' j).op) (face i j hji)\n  dsimp at H₁ H₂\n  erw [H, H₁, H₂, h _ hji]",
+      "distorted_proof": "by\n  apply NatTrans.ext; apply funext; apply Opposite.rec; apply SimplexCategory.rec\n  intro m; ext f\n  obtain ⟨f', hf⟩ := (standardSimplex.objEquiv _ _).symm.surjective f.2\n  obtain ⟨j, hji, hfj⟩ : ∃ j, ¬j = i ∧ ∀ k, f'.toOrderHom k ≠ j := by\n    obtain ⟨f, hf'⟩ := f\n    subst hf\n    simpa [← Set.univ_subset_iff, Set.subset_def, asOrderHom, not_or] using hf'\n  have H : f = (Λ[n+1, i].map (factor_δ f' j).op) (face i j hji) := by\n    apply Subtype.ext\n    apply (standardSimplex.objEquiv _ _).injective\n    rw [← hf]\n    exact (factor_δ_spec f' j hfj).symm\n  have H₁ := congrFun (σ₁.naturality (factor_δ f' j).op) (face i j hji)\n  have H₂ := congrFun (σ₂.naturality (factor_δ f' j).op) (face i j hji)\n  dsimp at H₁ H₂\n  erw [H, H₁, H₂, h _ hji]",
+      "verifier_verdict": "fail:application type mismatch\n  Equiv.surjective (standardSimplex.objEquiv ?m.1870 ?m.1871).symm f.property\nargument\n  f.pro",
+      "outcome": "DETECTED",
+      "error_message": "application type mismatch"
+    },
+    {
+      "full_name": "discrim_le_zero",
+      "proof_len": 735,
+      "distortion": "flip_field_1_2",
+      "original_proof": "by\n  rw [discrim, sq]\n  obtain ha | rfl | ha : a < 0 ∨ a = 0 ∨ 0 < a := lt_trichotomy a 0\n  · have : Tendsto (fun x => (a * x + b) * x + c) atTop atBot :=\n      tendsto_atBot_add_const_right _ c\n        ((tendsto_atBot_add_const_right _ b (tendsto_id.const_mul_atTop_of_neg ha)).atBot_mul_atTop\n          tendsto_id)\n    rcases (this.eventually (eventually_lt_atBot 0)).exists with ⟨x, hx⟩\n    exact False.elim ((h x).not_lt <| by rwa [← add_mul])\n  · rcases eq_or_ne b 0 with (rfl | hb)\n    · simp\n    · have := h ((-c - 1) / b)\n      rw [mul_div_cancel₀ _ hb] at this\n      linarith\n  · have ha' : 0 ≤ 4 * a := mul_nonneg zero_le_four ha.le\n    convert neg_nonpos.2 (mul_nonneg ha' (h (-b / (2 * a)))) using 1\n    field_simp\n    ring",
+      "distorted_proof": "by\n  rw [discrim, sq]\n  obtain ha | rfl | ha : a < 0 ∨ a = 0 ∨ 0 < a := lt_trichotomy a 0\n  · have : Tendsto (fun x => (a * x + b) * x + c) atTop atBot :=\n      tendsto_atBot_add_const_right _ c\n        ((tendsto_atBot_add_const_right _ b (tendsto_id.const_mul_atTop_of_neg ha)).atBot_mul_atTop\n          tendsto_id)\n    rcases (this.eventually (eventually_lt_atBot 0)).exists with ⟨x, hx⟩\n    exact False.elim ((h x).not_lt <| by rwa [← add_mul])\n  · rcases eq_or_ne b 0 with (rfl | hb)\n    · simp\n    · have := h ((-c - 1) / b)\n      rw [mul_div_cancel₀ _ hb] at this\n      linarith\n  · have ha' : 0 ≤ 4 * a := mul_nonneg zero_le_four ha.le\n    convert neg_nonpos.1 (mul_nonneg ha' (h (-b / (2 * a)))) using 1\n    field_simp\n    ring",
+      "verifier_verdict": "fail:application type mismatch\n  neg_nonpos.mp (mul_nonneg ha' (h (-b / (2 * a))))\nargument\n  mul_nonneg ha' (h (-b / (2 * a)",
+      "outcome": "DETECTED",
+      "error_message": "application type mismatch"
+    },
+    {
+      "full_name": "AlgebraicGeometry.Scheme.Pullback.lift_comp_ι",
+      "proof_len": 733,
+      "distortion": "insert_symm",
+      "original_proof": "by\n  apply ((gluing 𝒰 f g).openCover.pullbackCover pullback.fst).hom_ext\n  intro j\n  dsimp only [OpenCover.pullbackCover]\n  trans pullbackFstιToV 𝒰 f g i j ≫ fV 𝒰 f g j i ≫ (gluing 𝒰 f g).ι _\n  · rw [← show _ = fV 𝒰 f g j i ≫ _ from (gluing 𝒰 f g).glue_condition j i]\n    simp_rw [← Category.assoc]\n    congr 1\n    rw [gluing_f, gluing_t]\n    apply pullback.hom_ext <;> simp_rw [Category.assoc]\n    · simp_rw [t_fst_fst, pullback.lift_fst, pullbackFstιToV_snd, GlueData.openCover_map]\n    · simp_rw [t_fst_snd, pullback.lift_snd, pullbackFstιToV_fst_assoc, pullback.condition_assoc,\n        GlueData.openCover_map, p2]\n      simp\n  · rw [pullback.condition, ← Category.assoc]\n    simp_rw [pullbackFstιToV_fst, GlueData.openCover_map]",
+      "distorted_proof": "by\n  apply ((gluing 𝒰 f g).openCover.pullbackCover pullback.fst).hom_ext\n  intro j\n  dsimp only [OpenCover.pullbackCover]\n  trans pullbackFstιToV 𝒰 f g i j ≫ fV 𝒰 f g j i ≫ (gluing 𝒰 f g).ι _\n  · rw [← show _ = fV 𝒰 f g j i ≫ _ from (gluing 𝒰 f g).glue_condition j i]\n    simp_rw [← Category.assoc]\n    congr 1\n    rw [gluing_f, gluing_t]\n    apply pullback.symm.hom_ext <;> simp_rw [Category.assoc]\n    · simp_rw [t_fst_fst, pullback.lift_fst, pullbackFstιToV_snd, GlueData.openCover_map]\n    · simp_rw [t_fst_snd, pullback.lift_snd, pullbackFstιToV_fst_assoc, pullback.condition_assoc,\n        GlueData.openCover_map, p2]\n      simp\n  · rw [pullback.condition, ← Category.assoc]\n    simp_rw [pullbackFstιToV_fst, GlueData.openCover_map]",
+      "verifier_verdict": "fail:invalid field notation, type is not of the form (C ...) where C is a constant\n  pullback\nhas type\n  (f : ?m.23453 ⟶ ?m.2",
+      "outcome": "DETECTED",
+      "error_message": "invalid field notation, type is not of the form (C ...) where C is a constant"
+    },
+    {
+      "full_name": "QuaternionAlgebra.Basis.lift_mul",
+      "proof_len": 643,
+      "distortion": "wrong_comm",
+      "original_proof": "by\n  simp only [lift, Algebra.algebraMap_eq_smul_one]\n  simp_rw [add_mul, mul_add, smul_mul_assoc, mul_smul_comm, one_mul, mul_one, smul_smul]\n  simp only [i_mul_i, j_mul_j, i_mul_j, j_mul_i, i_mul_k, k_mul_i, k_mul_j, j_mul_k, k_mul_k]\n  simp only [smul_smul, smul_neg, sub_eq_add_neg, add_smul, ← add_assoc, mul_neg, neg_smul]\n  simp only [mul_right_comm _ _ (c₁ * c₂), mul_comm _ (c₁ * c₂)]\n  simp only [mul_comm _ c₁, mul_right_comm _ _ c₁]\n  simp only [mul_comm _ c₂, mul_right_comm _ _ c₂]\n  simp only [← mul_comm c₁ c₂, ← mul_assoc]\n  simp only [mul_re, sub_eq_add_neg, add_smul, neg_smul, mul_imI, ← add_assoc, mul_imJ, mul_imK]\n  abel",
+      "distorted_proof": "by\n  simp only [lift, Algebra.algebraMap_eq_smul_one]\n  simp_rw [add_mul, mul_add, smul_mul_assoc, mul_sadd_comm, one_mul, mul_one, smul_smul]\n  simp only [i_mul_i, j_mul_j, i_mul_j, j_mul_i, i_mul_k, k_mul_i, k_mul_j, j_mul_k, k_mul_k]\n  simp only [smul_smul, smul_neg, sub_eq_add_neg, add_smul, ← add_assoc, mul_neg, neg_smul]\n  simp only [mul_right_comm _ _ (c₁ * c₂), mul_comm _ (c₁ * c₂)]\n  simp only [mul_comm _ c₁, mul_right_comm _ _ c₁]\n  simp only [mul_comm _ c₂, mul_right_comm _ _ c₂]\n  simp only [← mul_comm c₁ c₂, ← mul_assoc]\n  simp only [mul_re, sub_eq_add_neg, add_smul, neg_smul, mul_imI, ← add_assoc, mul_imJ, mul_imK]\n  abel",
+      "verifier_verdict": "fail:unknown identifier 'mul_sadd_comm'\nsimp made no progress",
+      "outcome": "DETECTED",
+      "error_message": "unknown identifier 'mul_sadd_comm'"
+    },
+    {
+      "full_name": "AlgebraicTopology.NormalizedMooreComplex.d_squared",
+      "proof_len": 639,
+      "distortion": "simp_to_exact_rfl",
+      "original_proof": "by\n  rcases n with _ | n <;> dsimp [objD]\n  · erw [Subobject.factorThru_arrow_assoc, Category.assoc,\n      ← X.δ_comp_δ_assoc (Fin.zero_le (0 : Fin 2)),\n      ← factorThru_arrow _ _ (finset_inf_arrow_factors Finset.univ _ (0 : Fin 2) (by simp)),\n      Category.assoc, kernelSubobject_arrow_comp_assoc, zero_comp, comp_zero]\n  · erw [factorThru_right, factorThru_eq_zero, factorThru_arrow_assoc, Category.assoc,\n      ← X.δ_comp_δ (Fin.zero_le (0 : Fin (n + 3))),\n      ← factorThru_arrow _ _ (finset_inf_arrow_factors Finset.univ _ (0 : Fin (n + 3)) (by simp)),\n      Category.assoc, kernelSubobject_arrow_comp_assoc, zero_comp, comp_zero]",
+      "distorted_proof": "by\n  rcases n with _ | n <;> dsimp [objD]\n  · erw [Subobject.factorThru_arrow_assoc, Category.assoc,\n      ← X.δ_comp_δ_assoc (Fin.zero_le (0 : Fin 2)),\n      ← factorThru_arrow _ _ (finset_inf_arrow_factors Finset.univ _ (0 : Fin 2) (by exact rfl\n      Category.assoc, kernelSubobject_arrow_comp_assoc, zero_comp, comp_zero]\n  · erw [factorThru_right, factorThru_eq_zero, factorThru_arrow_assoc, Category.assoc,\n      ← X.δ_comp_δ (Fin.zero_le (0 : Fin (n + 3))),\n      ← factorThru_arrow _ _ (finset_inf_arrow_factors Finset.univ _ (0 : Fin (n + 3)) (by simp)),\n      Category.assoc, kernelSubobject_arrow_comp_assoc, zero_comp, comp_zero]",
+      "verifier_verdict": "fail:unexpected identifier; expected ')', ',' or ':'\nunsolved goals\ncase zero\nC : Type u_1\ninst✝¹ : Category.{u_2, u_1} C\nins",
+      "outcome": "DETECTED",
+      "error_message": "unexpected identifier; expected ')', ',' or ':'"
+    },
+    {
+      "full_name": "Function.Exact.split_tfae'",
+      "proof_len": 599,
+      "distortion": "strip_symm",
+      "original_proof": "by\n  tfae_have 1 → 3\n  · rintro ⟨hf, l, hl⟩\n    exact ⟨_, (h.splitSurjectiveEquiv hf ⟨l, hl⟩).2⟩\n  tfae_have 2 → 3\n  · rintro ⟨hg, l, hl⟩\n    exact ⟨_, (h.splitInjectiveEquiv hg ⟨l, hl⟩).2⟩\n  tfae_have 3 → 1\n  · rintro ⟨e, e₁, e₂⟩\n    have : Function.Injective f := e₁ ▸ e.symm.injective.comp LinearMap.inl_injective\n    refine ⟨this, ⟨_, ((h.splitSurjectiveEquiv this).symm ⟨e, e₁, e₂⟩).2⟩⟩\n  tfae_have 3 → 2\n  · rintro ⟨e, e₁, e₂⟩\n    have : Function.Surjective g := e₂ ▸ Prod.snd_surjective.comp e.surjective\n    refine ⟨this, ⟨_, ((h.splitInjectiveEquiv this).symm ⟨e, e₁, e₂⟩).2⟩⟩\n  tfae_finish",
+      "distorted_proof": "by\n  tfae_have 1 → 3\n  · rintro ⟨hf, l, hl⟩\n    exact ⟨_, (h.splitSurjectiveEquiv hf ⟨l, hl⟩).2⟩\n  tfae_have 2 → 3\n  · rintro ⟨hg, l, hl⟩\n    exact ⟨_, (h.splitInjectiveEquiv hg ⟨l, hl⟩).2⟩\n  tfae_have 3 → 1\n  · rintro ⟨e, e₁, e₂⟩\n    have : Function.Injective f := e₁ ▸ e.injective.comp LinearMap.inl_injective\n    refine ⟨this, ⟨_, ((h.splitSurjectiveEquiv this).symm ⟨e, e₁, e₂⟩).2⟩⟩\n  tfae_have 3 → 2\n  · rintro ⟨e, e₁, e₂⟩\n    have : Function.Surjective g := e₂ ▸ Prod.snd_surjective.comp e.surjective\n    refine ⟨this, ⟨_, ((h.splitInjectiveEquiv this).symm ⟨e, e₁, e₂⟩).2⟩⟩\n  tfae_finish",
+      "verifier_verdict": "fail:type mismatch\n  Injective.comp (LinearEquiv.injective e) ?m.37152\nhas type\n  Injective (⇑e ∘ ?m.33562) : Prop\nbut is exp",
+      "outcome": "DETECTED",
+      "error_message": "type mismatch"
+    },
+    {
+      "full_name": "Prime.dvd_of_pow_dvd_pow_mul_pow_of_square_not_dvd",
+      "proof_len": 591,
+      "distortion": "insert_symm",
+      "original_proof": "by\n  cases' hp.dvd_or_dvd ((dvd_pow_self p (Nat.succ_ne_zero n)).trans hpow) with H hbdiv\n  · exact hp.dvd_of_dvd_pow H\n  obtain ⟨x, rfl⟩ := hp.dvd_of_dvd_pow hbdiv\n  obtain ⟨y, hy⟩ := hpow\n  have : a ^ n.succ * x ^ n = p * y := by\n    refine mul_left_cancel₀ (pow_ne_zero n hp.ne_zero) ?_\n    rw [← mul_assoc _ p, ← pow_succ, ← hy, mul_pow, ← mul_assoc (a ^ n.succ), mul_comm _ (p ^ n),\n      mul_assoc]\n  refine hp.dvd_of_dvd_pow ((hp.dvd_or_dvd ⟨_, this⟩).resolve_right fun hdvdx => hb ?_)\n  obtain ⟨z, rfl⟩ := hp.dvd_of_dvd_pow hdvdx\n  rw [pow_two, ← mul_assoc]\n  exact dvd_mul_right _ _",
+      "distorted_proof": "by\n  cases' hp.dvd_or_dvd ((dvd_pow_self p (Nat.succ_ne_zero n)).trans hpow) with H hbdiv\n  · exact hp.symm.dvd_of_dvd_pow H\n  obtain ⟨x, rfl⟩ := hp.dvd_of_dvd_pow hbdiv\n  obtain ⟨y, hy⟩ := hpow\n  have : a ^ n.succ * x ^ n = p * y := by\n    refine mul_left_cancel₀ (pow_ne_zero n hp.ne_zero) ?_\n    rw [← mul_assoc _ p, ← pow_succ, ← hy, mul_pow, ← mul_assoc (a ^ n.succ), mul_comm _ (p ^ n),\n      mul_assoc]\n  refine hp.dvd_of_dvd_pow ((hp.dvd_or_dvd ⟨_, this⟩).resolve_right fun hdvdx => hb ?_)\n  obtain ⟨z, rfl⟩ := hp.dvd_of_dvd_pow hdvdx\n  rw [pow_two, ← mul_assoc]\n  exact dvd_mul_right _ _",
+      "verifier_verdict": "fail:invalid field 'dvd_of_dvd_pow', the environment does not contain 'And.dvd_of_dvd_pow'\n  And.symm hp\nhas type\n  (¬IsUnit ",
+      "outcome": "DETECTED",
+      "error_message": "invalid field 'dvd_of_dvd_pow', the environment does not contain 'And.dvd_of_dvd_pow'"
+    },
+    {
+      "full_name": "AlgebraicGeometry.Scheme.Pullback.cocycle",
+      "proof_len": 549,
+      "distortion": "insert_symm",
+      "original_proof": "by\n  apply pullback.hom_ext <;> rw [Category.id_comp]\n  · apply pullback.hom_ext\n    · apply pullback.hom_ext\n      · simp_rw [Category.assoc, cocycle_fst_fst_fst 𝒰 f g i j k]\n      · simp_rw [Category.assoc, cocycle_fst_fst_snd 𝒰 f g i j k]\n    · simp_rw [Category.assoc, cocycle_fst_snd 𝒰 f g i j k]\n  · apply pullback.hom_ext\n    · apply pullback.hom_ext\n      · simp_rw [Category.assoc, cocycle_snd_fst_fst 𝒰 f g i j k]\n      · simp_rw [Category.assoc, cocycle_snd_fst_snd 𝒰 f g i j k]\n    · simp_rw [Category.assoc, cocycle_snd_snd 𝒰 f g i j k]",
+      "distorted_proof": "by\n  apply pullback.symm.hom_ext <;> rw [Category.id_comp]\n  · apply pullback.hom_ext\n    · apply pullback.hom_ext\n      · simp_rw [Category.assoc, cocycle_fst_fst_fst 𝒰 f g i j k]\n      · simp_rw [Category.assoc, cocycle_fst_fst_snd 𝒰 f g i j k]\n    · simp_rw [Category.assoc, cocycle_fst_snd 𝒰 f g i j k]\n  · apply pullback.hom_ext\n    · apply pullback.hom_ext\n      · simp_rw [Category.assoc, cocycle_snd_fst_fst 𝒰 f g i j k]\n      · simp_rw [Category.assoc, cocycle_snd_fst_snd 𝒰 f g i j k]\n    · simp_rw [Category.assoc, cocycle_snd_snd 𝒰 f g i j k]",
+      "verifier_verdict": "fail:invalid field notation, type is not of the form (C ...) where C is a constant\n  pullback\nhas type\n  (f : ?m.1877 ⟶ ?m.18",
+      "outcome": "DETECTED",
+      "error_message": "invalid field notation, type is not of the form (C ...) where C is a constant"
+    },
+    {
+      "full_name": "AlgebraicGeometry.Scheme.OpenCover.fromGlued_open_map",
+      "proof_len": 531,
+      "distortion": "insert_symm",
+      "original_proof": "by\n  intro U hU\n  rw [isOpen_iff_forall_mem_open]\n  intro x hx\n  rw [𝒰.gluedCover.isOpen_iff] at hU\n  use 𝒰.fromGlued.val.base '' U ∩ Set.range (𝒰.map (𝒰.f x)).1.base\n  use Set.inter_subset_left\n  constructor\n  · rw [← Set.image_preimage_eq_inter_range]\n    apply (show IsOpenImmersion (𝒰.map (𝒰.f x)) from inferInstance).base_open.isOpenMap\n    convert hU (𝒰.f x) using 1\n    rw [← ι_fromGlued]; erw [coe_comp]; rw [Set.preimage_comp]\n    congr! 1\n    exact Set.preimage_image_eq _ 𝒰.fromGlued_injective\n  · exact ⟨hx, 𝒰.covers x⟩",
+      "distorted_proof": "by\n  intro U hU\n  rw [isOpen_iff_forall_mem_open]\n  intro x hx\n  rw [𝒰.gluedCover.isOpen_iff] at hU\n  use 𝒰.fromGlued.val.base '' U ∩ Set.range (𝒰.map (𝒰.f x)).1.base\n  use Set.inter_subset_left\n  constructor\n  · rw [← Set.image_preimage_eq_inter_range]\n    apply (show IsOpenImmersion (𝒰.map (𝒰.f x)) from inferInstance).base_open.isOpenMap\n    convert hU (𝒰.f x) using 1\n    rw [← ι_fromGlued]; erw [coe_comp]; rw [Set.preimage_comp]\n    congr! 1\n    exact Set.symm.preimage_image_eq _ 𝒰.fromGlued_injective\n  · exact ⟨hx, 𝒰.covers x⟩",
+      "verifier_verdict": "fail:unknown constant 'Set.symm.preimage_image_eq'",
+      "outcome": "DETECTED",
+      "error_message": "unknown constant 'Set.symm.preimage_image_eq'"
+    },
+    {
+      "full_name": "dvd_prime_pow",
+      "proof_len": 506,
+      "distortion": "flip_mp_mpr",
+      "original_proof": "by\n  induction' n with n ih generalizing q\n  · simp [← isUnit_iff_dvd_one, associated_one_iff_isUnit]\n  refine ⟨fun h => ?_, fun ⟨i, hi, hq⟩ => hq.dvd.trans (pow_dvd_pow p hi)⟩\n  rw [pow_succ'] at h\n  rcases hp.left_dvd_or_dvd_right_of_dvd_mul h with (⟨q, rfl⟩ | hno)\n  · rw [mul_dvd_mul_iff_left hp.ne_zero, ih] at h\n    rcases h with ⟨i, hi, hq⟩\n    refine ⟨i + 1, Nat.succ_le_succ hi, (hq.mul_left p).trans ?_⟩\n    rw [pow_succ']\n  · obtain ⟨i, hi, hq⟩ := ih.mp hno\n    exact ⟨i, hi.trans n.le_succ, hq⟩",
+      "distorted_proof": "by\n  induction' n with n ih generalizing q\n  · simp [← isUnit_iff_dvd_one, associated_one_iff_isUnit]\n  refine ⟨fun h => ?_, fun ⟨i, hi, hq⟩ => hq.dvd.trans (pow_dvd_pow p hi)⟩\n  rw [pow_succ'] at h\n  rcases hp.left_dvd_or_dvd_right_of_dvd_mul h with (⟨q, rfl⟩ | hno)\n  · rw [mul_dvd_mul_iff_left hp.ne_zero, ih] at h\n    rcases h with ⟨i, hi, hq⟩\n    refine ⟨i + 1, Nat.succ_le_succ hi, (hq.mul_left p).trans ?_⟩\n    rw [pow_succ']\n  · obtain ⟨i, hi, hq⟩ := ih.mpr hno\n    exact ⟨i, hi.trans n.le_succ, hq⟩",
+      "verifier_verdict": "fail:application type mismatch\n  ih.mpr hno\nargument\n  hno\nhas type\n  q ∣ p ^ n : Prop\nbut is expected to have type\n  ∃ i ≤ n",
+      "outcome": "DETECTED",
+      "error_message": "application type mismatch"
+    },
+    {
+      "full_name": "associated_of_dvd_dvd",
+      "proof_len": 470,
+      "distortion": "insert_symm",
+      "original_proof": "by\n  rcases hab with ⟨c, rfl⟩\n  rcases hba with ⟨d, a_eq⟩\n  by_cases ha0 : a = 0\n  · simp_all\n  have hac0 : a * c ≠ 0 := by\n    intro con\n    rw [con, zero_mul] at a_eq\n    apply ha0 a_eq\n  have : a * (c * d) = a * 1 := by rw [← mul_assoc, ← a_eq, mul_one]\n  have hcd : c * d = 1 := mul_left_cancel₀ ha0 this\n  have : a * c * (d * c) = a * c * 1 := by rw [← mul_assoc, ← a_eq, mul_one]\n  have hdc : d * c = 1 := mul_left_cancel₀ hac0 this\n  exact ⟨⟨c, d, hcd, hdc⟩, rfl⟩",
+      "distorted_proof": "by\n  rcases hab with ⟨c, rfl⟩\n  rcases hba with ⟨d, a_eq⟩\n  by_cases ha0 : a = 0\n  · simp_all\n  have hac0 : a * c ≠ 0 := by\n    intro con\n    rw [con, zero_mul] at a_eq\n    apply ha0.symm a_eq\n  have : a * (c * d) = a * 1 := by rw [← mul_assoc, ← a_eq, mul_one]\n  have hcd : c * d = 1 := mul_left_cancel₀ ha0 this\n  have : a * c * (d * c) = a * c * 1 := by rw [← mul_assoc, ← a_eq, mul_one]\n  have hdc : d * c = 1 := mul_left_cancel₀ hac0 this\n  exact ⟨⟨c, d, hcd, hdc⟩, rfl⟩",
+      "verifier_verdict": "fail:invalid field 'symm', the environment does not contain 'Not.symm'\n  ha0\nhas type\n  ¬a = 0\ninvalid field notation, type i",
+      "outcome": "DETECTED",
+      "error_message": "invalid field 'symm', the environment does not contain 'Not.symm'"
+    },
+    {
+      "full_name": "TrivSqZeroExt.mul_inv_rev",
+      "proof_len": 439,
+      "distortion": "wrong_comm",
+      "original_proof": "by\n  ext\n  · rw [fst_inv, fst_mul, fst_mul, mul_inv_rev, fst_inv, fst_inv]\n  · simp only [snd_inv, snd_mul, fst_mul, fst_inv]\n    simp only [neg_smul, smul_neg, smul_add]\n    simp_rw [mul_inv_rev, smul_comm (_ : R), op_smul_op_smul, smul_smul, add_comm, neg_add]\n    obtain ha0 | ha := eq_or_ne (fst a) 0\n    · simp [ha0]\n    obtain hb0 | hb := eq_or_ne (fst b) 0\n    · simp [hb0]\n    rw [inv_mul_cancel_right₀ ha, mul_inv_cancel_left₀ hb]",
+      "distorted_proof": "by\n  ext\n  · rw [fst_inv, fst_mul, fst_mul, mul_inv_rev, fst_inv, fst_inv]\n  · simp only [snd_inv, snd_mul, fst_mul, fst_inv]\n    simp only [neg_smul, smul_neg, smul_add]\n    simp_rw [mul_inv_rev, sadd_comm (_ : R), op_smul_op_smul, smul_smul, add_comm, neg_add]\n    obtain ha0 | ha := eq_or_ne (fst a) 0\n    · simp [ha0]\n    obtain hb0 | hb := eq_or_ne (fst b) 0\n    · simp [hb0]\n    rw [inv_mul_cancel_right₀ ha, mul_inv_cancel_left₀ hb]",
+      "verifier_verdict": "fail:unknown identifier 'sadd_comm'\nsimp made no progress",
+      "outcome": "DETECTED",
+      "error_message": "unknown identifier 'sadd_comm'"
+    },
+    {
+      "full_name": "AlgebraicGeometry.basicOpen_eq_of_affine",
+      "proof_len": 438,
+      "distortion": "simp_to_exact_rfl",
+      "original_proof": "by\n  ext x\n  simp only [SetLike.mem_coe, Scheme.mem_basicOpen_top, Opens.coe_top]\n  suffices IsUnit (StructureSheaf.toStalk R x f) ↔ f ∉ PrimeSpectrum.asIdeal x by exact this\n  erw [← isUnit_map_iff (StructureSheaf.stalkToFiberRingHom R x),\n    StructureSheaf.stalkToFiberRingHom_toStalk]\n  exact\n    (IsLocalization.AtPrime.isUnit_to_map_iff (Localization.AtPrime (PrimeSpectrum.asIdeal x))\n        (PrimeSpectrum.asIdeal x) f :\n      _)",
+      "distorted_proof": "by\n  ext x\n  exact rfl\n  suffices IsUnit (StructureSheaf.toStalk R x f) ↔ f ∉ PrimeSpectrum.asIdeal x by exact this\n  erw [← isUnit_map_iff (StructureSheaf.stalkToFiberRingHom R x),\n    StructureSheaf.stalkToFiberRingHom_toStalk]\n  exact\n    (IsLocalization.AtPrime.isUnit_to_map_iff (Localization.AtPrime (PrimeSpectrum.asIdeal x))\n        (PrimeSpectrum.asIdeal x) f :\n      _)",
+      "verifier_verdict": "fail:type mismatch\n  rfl\nhas type\n  ?m.605 = ?m.605 : Prop\nbut is expected to have type\n  x ∈ ↑((Spec R).basicOpen ((Scheme.Γ",
+      "outcome": "DETECTED",
+      "error_message": "type mismatch"
+    },
+    {
+      "full_name": "AlgebraicGeometry.functionField_isFractionRing_of_isAffineOpen",
+      "proof_len": 430,
+      "distortion": "insert_symm",
+      "original_proof": "by\n  haveI : IsAffine _ := hU\n  haveI : Nonempty (X ∣_ᵤ U) := hU'\n  haveI : IsIntegral (X ∣_ᵤ U) :=\n    @isIntegral_of_isAffine_of_isDomain _ _ _\n      (by dsimp; rw [Opens.openEmbedding_obj_top]; infer_instance)\n  delta IsFractionRing Scheme.functionField\n  convert hU.isLocalization_stalk ⟨genericPoint X, _⟩ using 1\n  rw [hU.primeIdealOf_genericPoint, genericPoint_eq_bot_of_affine]\n  ext; exact mem_nonZeroDivisors_iff_ne_zero",
+      "distorted_proof": "by\n  haveI : IsAffine _ := hU\n  haveI : Nonempty (X ∣_ᵤ U) := hU'\n  haveI : IsIntegral (X ∣_ᵤ U) :=\n    @isIntegral_of_isAffine_of_isDomain _ _ _\n      (by dsimp; rw [Opens.openEmbedding_obj_top]; infer_instance)\n  delta IsFractionRing Scheme.functionField\n  convert hU.isLocalization_stalk ⟨genericPoint X, _⟩ using 1\n  rw [hU.primeIdealOf_genericPoint, genericPoint_eq_bot_of_affine]\n  ext; exact mem_nonZeroDivisors_iff_ne_zero.symm",
+      "verifier_verdict": "fail:typeclass instance problem is stuck, it is often due to metavariables\n  Nontrivial ?m.5151",
+      "outcome": "DETECTED",
+      "error_message": "typeclass instance problem is stuck, it is often due to metavariables"
+    },
+    {
+      "full_name": "TrivSqZeroExt.snd_list_prod",
+      "proof_len": 428,
+      "distortion": "insert_symm",
+      "original_proof": "by\n  induction' l with x xs ih\n  · simp\n  · rw [List.enum_cons, ← List.map_fst_add_enum_eq_enumFrom]\n    simp_rw [List.map_cons, List.map_map, Function.comp, Prod.map_snd, Prod.map_fst, id,\n      List.take_zero, List.take_cons, List.prod_nil, List.prod_cons, snd_mul, one_smul, List.drop,\n      mul_smul, List.sum_cons, fst_list_prod, ih, List.smul_sum, List.map_map,\n      ← smul_comm (_ : R) (_ : Rᵐᵒᵖ)]\n    exact add_comm _ _",
+      "distorted_proof": "by\n  induction' l with x xs ih\n  · simp\n  · rw [List.enum_cons, ← List.map_fst_add_enum_eq_enumFrom]\n    simp_rw [List.map_cons, List.map_map, Function.comp, Prod.map_snd, Prod.map_fst, id,\n      List.take_zero, List.take_cons, List.prod_nil, List.prod_cons, snd_mul, one_smul, List.drop,\n      mul_smul, List.sum_cons, fst_list_prod, ih, List.smul_sum, List.map_map,\n      ← smul_comm (_ : R) (_ : Rᵐᵒᵖ)]\n    exact add_comm.symm _ _",
+      "verifier_verdict": "fail:invalid field notation, type is not of the form (C ...) where C is a constant\n  add_comm\nhas type\n  ∀ (a b : ?m.33030), ",
+      "outcome": "DETECTED",
+      "error_message": "invalid field notation, type is not of the form (C ...) where C is a constant"
+    },
+    {
+      "full_name": "AlgebraicGeometry.genericPoint_eq_of_isOpenImmersion",
+      "proof_len": 424,
+      "distortion": "flip_field_1_2",
+      "original_proof": "by\n  apply ((genericPoint_spec Y).eq _).symm\n  convert (genericPoint_spec X).image (show Continuous f.1.base by fun_prop)\n  symm\n  rw [eq_top_iff, Set.top_eq_univ, Set.top_eq_univ]\n  convert subset_closure_inter_of_isPreirreducible_of_isOpen _ H.base_open.isOpen_range _\n  · rw [Set.univ_inter, Set.image_univ]\n  · apply PreirreducibleSpace.isPreirreducible_univ (X := Y)\n  · exact ⟨_, trivial, Set.mem_range_self hX.2.some⟩",
+      "distorted_proof": "by\n  apply ((genericPoint_spec Y).eq _).symm\n  convert (genericPoint_spec X).image (show Continuous f.2.base by fun_prop)\n  symm\n  rw [eq_top_iff, Set.top_eq_univ, Set.top_eq_univ]\n  convert subset_closure_inter_of_isPreirreducible_of_isOpen _ H.base_open.isOpen_range _\n  · rw [Set.univ_inter, Set.image_univ]\n  · apply PreirreducibleSpace.isPreirreducible_univ (X := Y)\n  · exact ⟨_, trivial, Set.mem_range_self hX.2.some⟩",
+      "verifier_verdict": "fail:invalid field notation, type is not of the form (C ...) where C is a constant\n  f.prop\nhas type\n  ∀ (x : ↑↑X.toPresheafe",
+      "outcome": "DETECTED",
+      "error_message": "invalid field notation, type is not of the form (C ...) where C is a constant"
+    },
+    {
+      "full_name": "prime_mul_iff",
+      "proof_len": 368,
+      "distortion": "flip_left_right",
+      "original_proof": "by\n  refine ⟨fun h ↦ ?_, ?_⟩\n  · rcases of_irreducible_mul h.irreducible with hx | hy\n    · exact Or.inr ⟨hx, (associated_unit_mul_left y x hx).prime h⟩\n    · exact Or.inl ⟨(associated_mul_unit_left x y hy).prime h, hy⟩\n  · rintro (⟨hx, hy⟩ | ⟨hx, hy⟩)\n    · exact (associated_mul_unit_left x y hy).symm.prime hx\n    · exact (associated_unit_mul_right y x hx).prime hy",
+      "distorted_proof": "by\n  refine ⟨fun h ↦ ?_, ?_⟩\n  · rcases of_irreducible_mul h.irreducible with hx | hy\n    · exact Or.inr ⟨hx, (associated_unit_mul_left y x hx).prime h⟩\n    · exact Or.inr ⟨(associated_mul_unit_left x y hy).prime h, hy⟩\n  · rintro (⟨hx, hy⟩ | ⟨hx, hy⟩)\n    · exact (associated_mul_unit_left x y hy).symm.prime hx\n    · exact (associated_unit_mul_right y x hx).prime hy",
+      "verifier_verdict": "fail:application type mismatch\n  And.intro (Associated.prime (associated_mul_unit_left x y hy) h)\nargument\n  Associated.prime",
+      "outcome": "DETECTED",
+      "error_message": "application type mismatch"
+    },
+    {
+      "full_name": "prime_pow_iff",
+      "proof_len": 360,
+      "distortion": "insert_symm",
+      "original_proof": "by\n  refine ⟨fun hp ↦ ?_, fun ⟨hp, hn⟩ ↦ by simpa [hn]⟩\n  suffices n = 1 by aesop\n  cases' n with n\n  · simp at hp\n  · rw [Nat.succ.injEq]\n    rw [pow_succ', prime_mul_iff] at hp\n    rcases hp with ⟨hp, hpn⟩ | ⟨hp, hpn⟩\n    · by_contra contra\n      rw [isUnit_pow_iff contra] at hpn\n      exact hp.not_unit hpn\n    · exfalso\n      exact hpn.not_unit (hp.pow n)",
+      "distorted_proof": "by\n  refine ⟨fun hp ↦ ?_, fun ⟨hp, hn⟩ ↦ by simpa [hn]⟩\n  suffices n = 1 by aesop\n  cases' n with n\n  · simp at hp\n  · rw [Nat.succ.injEq]\n    rw [pow_succ', prime_mul_iff] at hp\n    rcases hp with ⟨hp, hpn⟩ | ⟨hp, hpn⟩\n    · by_contra contra\n      rw [isUnit_pow_iff contra] at hpn\n      exact hp.symm.not_unit hpn\n    · exfalso\n      exact hpn.not_unit (hp.pow n)",
+      "verifier_verdict": "fail:invalid field 'not_unit', the environment does not contain 'And.not_unit'\n  And.symm hp\nhas type\n  (¬IsUnit p ∧ ∀ (a b :",
+      "outcome": "DETECTED",
+      "error_message": "invalid field 'not_unit', the environment does not contain 'And.not_unit'"
+    },
+    {
+      "full_name": "prime_pow_succ_dvd_mul",
+      "proof_len": 358,
+      "distortion": "flip_mp_mpr",
+      "original_proof": "by\n  rw [or_iff_not_imp_right]\n  intro hy\n  induction' i with i ih generalizing x\n  · rw [pow_one] at hxy ⊢\n    exact (h.dvd_or_dvd hxy).resolve_right hy\n  rw [pow_succ'] at hxy ⊢\n  obtain ⟨x', rfl⟩ := (h.dvd_or_dvd (dvd_of_mul_right_dvd hxy)).resolve_right hy\n  rw [mul_assoc] at hxy\n  exact mul_dvd_mul_left p (ih ((mul_dvd_mul_iff_left h.ne_zero).mp hxy))",
+      "distorted_proof": "by\n  rw [or_iff_not_imp_right]\n  intro hy\n  induction' i with i ih generalizing x\n  · rw [pow_one] at hxy ⊢\n    exact (h.dvd_or_dvd hxy).resolve_right hy\n  rw [pow_succ'] at hxy ⊢\n  obtain ⟨x', rfl⟩ := (h.dvd_or_dvd (dvd_of_mul_right_dvd hxy)).resolve_right hy\n  rw [mul_assoc] at hxy\n  exact mul_dvd_mul_left p (ih ((mul_dvd_mul_iff_left h.ne_zero).mpr hxy))",
+      "verifier_verdict": "fail:application type mismatch\n  ih ((mul_dvd_mul_iff_left (Prime.ne_zero h)).mpr hxy)\nargument\n  (mul_dvd_mul_iff_left (Prim",
+      "outcome": "DETECTED",
+      "error_message": "application type mismatch"
+    }
+  ]
+}
