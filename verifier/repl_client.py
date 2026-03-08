@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 import os
 import queue
-import select
 import subprocess
 import threading
 import time
@@ -118,6 +117,9 @@ class LeanReplClient:
         self._proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
         self._started = False
+        # Reader thread feeds stdout into this queue (cross-platform: avoids select() on Windows)
+        self._stdout_queue: queue.Queue[bytes] = queue.Queue()
+        self._reader_thread: Optional[threading.Thread] = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -147,6 +149,14 @@ class LeanReplClient:
             bufsize=0,
         )
 
+        # Start background reader thread — avoids select() which doesn't work with
+        # pipes on Windows. The thread does blocking reads and feeds a queue.
+        self._stdout_queue = queue.Queue()
+        self._reader_thread = threading.Thread(
+            target=self._stdout_reader, daemon=True
+        )
+        self._reader_thread.start()
+
         # Wait for the initial ready signal: REPL> {"sid": 0, ...}
         self._wait_for_ready()
         self._started = True
@@ -165,6 +175,9 @@ class LeanReplClient:
                 pass
             self._proc = None
         self._started = False
+        # Unblock the reader thread if it's waiting on the queue
+        if self._reader_thread and self._reader_thread.is_alive():
+            self._stdout_queue.put(b"")  # sentinel
 
     def __enter__(self) -> "LeanReplClient":
         self.start()
@@ -186,7 +199,10 @@ class LeanReplClient:
             raise ReplError("Client not started. Call start() first.")
 
         timeout = timeout or self.command_timeout
-        payload = json.dumps({"sid": sid, "cmd": cmd}) + "\n"
+        # ensure_ascii=False so SMP Unicode characters (e.g. 𝒰 U+1D4B0) are
+        # sent as literal UTF-8 rather than \ud835\udc30 surrogate pairs, which
+        # Lean's JSON parser does not accept as valid identifier characters.
+        payload = json.dumps({"sid": sid, "cmd": cmd}, ensure_ascii=False) + "\n"
 
         with self._lock:
             try:
@@ -262,14 +278,26 @@ class LeanReplClient:
             f"No response within {timeout}s.\nPartial: {buf[:300]!r}"
         )
 
+    def _stdout_reader(self) -> None:
+        """Background thread: reads stdout in chunks, feeds self._stdout_queue."""
+        try:
+            while self._proc and self._proc.poll() is None:
+                chunk = os.read(self._proc.stdout.fileno(), 4096)
+                if chunk:
+                    self._stdout_queue.put(chunk)
+                else:
+                    break
+        except Exception:
+            pass
+
     def _read_chunk(self, timeout: float) -> bytes:
-        """Non-blocking read from stdout with timeout."""
+        """Pull a chunk from the stdout queue with timeout (cross-platform)."""
         if timeout <= 0:
             return b""
-        ready, _, _ = select.select([self._proc.stdout], [], [], timeout)
-        if ready:
-            return os.read(self._proc.stdout.fileno(), 4096)
-        return b""
+        try:
+            return self._stdout_queue.get(timeout=timeout)
+        except queue.Empty:
+            return b""
 
 
 # ------------------------------------------------------------------
@@ -357,9 +385,14 @@ class ReplPool:
         preamble: Optional[list[str]] = None,
         startup_timeout: float = STARTUP_TIMEOUT_S,
         command_timeout: float = COMMAND_TIMEOUT_S,
+        start_stagger_s: float = 4.0,
     ):
         self.size = size
-        self.preamble = preamble if preamble is not None else ["import Mathlib"]
+        # Default preamble is empty: the REPL entry file already runs `import Mathlib`
+        # before the REPL loop starts, so sid=0 is already post-Mathlib.
+        # Sending `import Mathlib` again causes "invalid import" errors.
+        self.preamble = preamble if preamble is not None else []
+        self.start_stagger_s = start_stagger_s  # seconds between worker launches to avoid lake lock
         self.startup_timeout = startup_timeout
         self.command_timeout = command_timeout
         self._sessions: list[ReplSession] = []
@@ -393,8 +426,13 @@ class ReplPool:
                 with lock:
                     errors.append(f"Worker {idx} failed to start: {e}")
 
+        # Stagger launches to avoid all workers contending on `lake env`'s exclusive
+        # file lock (.lake/lock). The 70s Mathlib-warm phase runs in parallel;
+        # only the initial lake-env spawn is serialised by this stagger.
         threads = [threading.Thread(target=_boot, args=(i,), daemon=True) for i in range(self.size)]
-        for t in threads:
+        for i, t in enumerate(threads):
+            if i > 0 and self.start_stagger_s > 0:
+                time.sleep(self.start_stagger_s)
             t.start()
         for t in threads:
             t.join()
