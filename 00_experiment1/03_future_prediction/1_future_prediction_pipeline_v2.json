@@ -1,0 +1,112 @@
+{
+  "meta": {
+    "name": "fvs_feature_config_v2",
+    "version": "2.0",
+    "created_utc": "2026-02-04",
+    "description": "Feature clusters for predicting downstream impact from a cleaned theorem dependency DAG. Features respect the (d,r) horizon: for r=0 use only seen graph (depth<=d or <d, configurable); for r>=1 allow peek into future via full G_dag neighborhood of v."
+  },
+  "params": {
+    "strict_past_seen_graph": true,
+    "forward_bfs_node_cap": 20000,
+    "ancestor_bfs_node_cap": 20000,
+    "parentset_similarity_topk": 25,
+    "max_upstream_hops_small": 2,
+    "module_growth_window": 5
+  },
+  "feature_clusters": {
+    "node_basic": {
+      "description": "Intrinsic node properties available at prediction time (no future info).",
+      "features": [
+        "depth",
+        "indeg_seen"
+      ]
+    },
+    "parents_degree_stats": {
+      "description": "Statistics of parents within the seen graph.",
+      "features": [
+        "parent_indeg_max",
+        "parent_outdeg_max",
+        "parent_depth_max"
+      ]
+    },
+    "parents_forward_reach_seen": {
+      "description": "Forward reachability proxies for parents, computed inside seen graph only (no leakage beyond horizon).",
+      "features": [
+        "parent_descendant_count_seen_max"
+      ]
+    },
+    "parents_ancestry_overlap": {
+      "description": "How similar parents are in upstream lineage (overlap of ancestor sets) inside seen graph only.",
+      "features": [
+        "parent_diversity"
+      ]
+    },
+    "parentset_structure": {
+      "description": "Higher-order statistics of the parent set (co-occurrence, novelty, recombination).",
+      "features": [
+        "parentset_cooccurrence_max",
+        "parentset_rarity_exact",
+        "parentset_similarity_topk_max",
+        "parent_lca_depth_pairwise_mean"
+      ]
+    },
+    "lineage_fertility": {
+      "description": "How 'fertile' the parents are at the next depth step in the seen graph.",
+      "features": [
+        "parent_beta_max"
+      ]
+    },
+    "upstream_nonlocal": {
+      "description": "Upstream structure beyond immediate parents (still upstream, but not local).",
+      "features": [
+        "upstream_2hop_node_count",
+        "upstream_2hop_edge_density"
+      ]
+    },
+    "mixture_diversity": {
+      "description": "How many distinct upstream components/modules the parents pull from.",
+      "features": [
+        "parent_wcc_entropy",
+        "parent_module_entropy"
+      ]
+    },
+    "peek_r1": {
+      "description": "r=1 peek: immediate children in the full DAG (one-step future).",
+      "features": [
+        "k1"
+      ]
+    },
+    "peek_r2": {
+      "description": "r=2 peek: grandchildren in the full DAG (two-step future).",
+      "features": [
+        "grandchild_count"
+      ]
+    }
+  },
+  "feature_sets": {
+    "r0": {
+      "include_clusters": [
+        "node_basic",
+        "parents_degree_stats",
+        "parents_forward_reach_seen",
+        "parents_ancestry_overlap",
+        "parentset_structure",
+        "lineage_fertility",
+        "upstream_nonlocal",
+        "mixture_diversity"
+      ]
+    },
+    "r1": {
+      "base": "r0",
+      "include_clusters": [
+        "peek_r1"
+      ]
+    },
+    "r2": {
+      "base": "r1",
+      "include_clusters": [
+        "peek_r2"
+      ]
+    }
+  }
+}

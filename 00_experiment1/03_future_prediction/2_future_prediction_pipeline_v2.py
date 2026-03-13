@@ -60,21 +60,22 @@ if sys.platform == 'win32' and hasattr(sys.stdout, 'buffer'):
 
 # Configuration
 _SCRIPT_DIR = Path(__file__).resolve().parent
-CACHE_DIR = _SCRIPT_DIR / "cache"
+DATA_DIR = _SCRIPT_DIR / "data"
+DATA_DIR.mkdir(exist_ok=True)
 FIGS_DIR = _SCRIPT_DIR / "figs"
 FIGS_DIR.mkdir(exist_ok=True)
-CACHE_BUNDLE = CACHE_DIR / "bundle.pkl"
+CACHE_BUNDLE = _SCRIPT_DIR.parent / "cache" / "bundle.pkl"
 
-# Cache prefix for FVS pipeline files
-FVS_CACHE_PREFIX = "fvs_pipeline_v2_"
-FVS_CACHE_DAG = CACHE_DIR / f"{FVS_CACHE_PREFIX}dag.pkl"
-FVS_CACHE_FVS = CACHE_DIR / f"{FVS_CACHE_PREFIX}fvs.pkl"
-FVS_CACHE_STATS = CACHE_DIR / f"{FVS_CACHE_PREFIX}stats.pkl"
-FVS_CACHE_DEPTHS = CACHE_DIR / f"{FVS_CACHE_PREFIX}depths.pkl"
-FVS_CACHE_TARGETS = CACHE_DIR / f"{FVS_CACHE_PREFIX}targets.pkl"
+# Data prefix for FVS pipeline files
+FVS_CACHE_PREFIX = "2_fvs_pipeline_v2_"
+FVS_CACHE_DAG = DATA_DIR / f"{FVS_CACHE_PREFIX}dag.pkl"
+FVS_CACHE_FVS = DATA_DIR / f"{FVS_CACHE_PREFIX}fvs.pkl"
+FVS_CACHE_STATS = DATA_DIR / f"{FVS_CACHE_PREFIX}stats.pkl"
+FVS_CACHE_DEPTHS = DATA_DIR / f"{FVS_CACHE_PREFIX}depths.pkl"
+FVS_CACHE_TARGETS = DATA_DIR / f"{FVS_CACHE_PREFIX}targets.pkl"
 
 # Feature config path (same name as script)
-DEFAULT_FEATURE_CONFIG = _SCRIPT_DIR / "01_fvs_prediction_pipeline_v2.json"
+DEFAULT_FEATURE_CONFIG = _SCRIPT_DIR / "2_future_prediction_pipeline_v2.json"
 
 # Set random seed for reproducibility
 random.seed(42)
@@ -166,7 +167,7 @@ def load_graph_from_cache() -> Optional[nx.DiGraph]:
 def save_fvs_cache(G_dag: nx.DiGraph, F: Set, stats: Dict):
     """Save FVS computation results to cache."""
     try:
-        CACHE_DIR.mkdir(exist_ok=True)
+        DATA_DIR.mkdir(exist_ok=True)
         with open(FVS_CACHE_DAG, "wb") as f:
             pickle.dump(G_dag, f, protocol=pickle.HIGHEST_PROTOCOL)
         with open(FVS_CACHE_FVS, "wb") as f:
@@ -541,6 +542,148 @@ def build_seen_graph(G_dag: nx.DiGraph, depth: Dict[str, int], d: int, strict_pa
     cutoff = d - 1 if strict_past else d
     nodes = [v for v in G_dag.nodes() if depth.get(v, 0) <= cutoff]
     return G_dag.subgraph(nodes).copy()
+
+
+def get_descendants_cached(G_dag: nx.DiGraph, node, cache: Dict) -> Set:
+    """Memoized descendants in the full DAG."""
+    if node not in cache:
+        cache[node] = nx.descendants(G_dag, node)
+    return cache[node]
+
+
+def get_ancestors_cached(G_dag: nx.DiGraph, node, cache: Dict) -> Set:
+    """Memoized ancestors in the full DAG."""
+    if node not in cache:
+        cache[node] = nx.ancestors(G_dag, node)
+    return cache[node]
+
+
+def infer_module_label(G_dag: nx.DiGraph, node) -> str:
+    attrs = G_dag.nodes[node] if node in G_dag.nodes else {}
+    for key in ["module", "namespace", "file", "path"]:
+        if key in attrs and attrs[key]:
+            return str(attrs[key])
+    text = str(node)
+    if "." in text:
+        return text.split(".")[0]
+    if "/" in text:
+        return text.split("/")[0]
+    return "unknown"
+
+
+def masked_successors_of_parent(G_dag: nx.DiGraph, parent, v, descendants_v: Set) -> List:
+    """Parent successors that remain visible after deleting descendants(v)."""
+    visible = []
+    for child in G_dag.successors(parent):
+        if child == v or child in descendants_v:
+            continue
+        visible.append(child)
+    return visible
+
+
+def compute_feature_vector_masked(
+    G_dag: nx.DiGraph,
+    depth: Dict[str, int],
+    v,
+    feature_names: List[str],
+    descendants_cache: Dict,
+    ancestors_cache: Dict,
+) -> Dict[str, float]:
+    """
+    Protocol 2: features for v computed on G - descendants(v).
+
+    To avoid trivial leakage from the size of the masked graph, this only uses
+    local/ancestral quantities and parent-side forward structure outside v's
+    descendant cone, not global graph-size statistics.
+    """
+    descendants_v = get_descendants_cached(G_dag, v, descendants_cache)
+    parents = list(G_dag.predecessors(v))
+    parent_ancestor_sets = {p: get_ancestors_cached(G_dag, p, ancestors_cache) for p in parents}
+    modules = [infer_module_label(G_dag, p) for p in parents]
+
+    parent_indegs = [G_dag.in_degree(p) for p in parents]
+    parent_depths = [depth.get(p, 0) for p in parents]
+
+    parent_visible_outdegs = []
+    parent_visible_desc_counts = []
+    parent_beta_vals = []
+    for p in parents:
+        visible_children = masked_successors_of_parent(G_dag, p, v, descendants_v)
+        parent_visible_outdegs.append(len(visible_children))
+        desc_p = get_descendants_cached(G_dag, p, descendants_cache)
+        parent_visible_desc_counts.append(len(desc_p - descendants_v - {v}))
+        beta = 0
+        p_depth = depth.get(p, 0)
+        for child in visible_children:
+            if depth.get(child, 0) == p_depth + 1:
+                beta += 1
+        parent_beta_vals.append(beta)
+
+    # Upstream-only local structure is unaffected by the target mask.
+    upstream_nodes = set(parents)
+    frontier = set(parents)
+    for _ in range(1):
+        nxt = set()
+        for u in frontier:
+            for p in G_dag.predecessors(u):
+                if p not in upstream_nodes:
+                    upstream_nodes.add(p)
+                    nxt.add(p)
+        frontier = nxt
+        if not frontier:
+            break
+    upstream_n = len(upstream_nodes)
+    upstream_m = G_dag.subgraph(upstream_nodes).number_of_edges() if upstream_nodes else 0
+
+    parent_diversity = 1.0
+    if len(parents) > 1:
+        overlaps = []
+        for i, p1 in enumerate(parents):
+            a1 = parent_ancestor_sets[p1]
+            for p2 in parents[i + 1 :]:
+                a2 = parent_ancestor_sets[p2]
+                union = len(a1 | a2)
+                overlaps.append((len(a1 & a2) / union) if union else 0.0)
+        if overlaps:
+            parent_diversity = float(1.0 - np.mean(overlaps))
+
+    lca_vals = []
+    if len(parents) > 1:
+        for i, p1 in enumerate(parents):
+            a1 = parent_ancestor_sets[p1] | {p1}
+            for p2 in parents[i + 1 :]:
+                a2 = parent_ancestor_sets[p2] | {p2}
+                common = a1 & a2
+                lca_vals.append(max((depth.get(x, 0) for x in common), default=0))
+
+    module_entropy = 0.0
+    if modules:
+        counts = Counter(modules)
+        module_entropy = entropy_from_counts(list(counts.values()))
+
+    safe_feature_values = {
+        "depth": float(depth.get(v, 0)),
+        "indeg_seen": float(len(parents)),
+        "parent_indeg_max": float(np.max(parent_indegs)) if parent_indegs else 0.0,
+        "parent_outdeg_max": float(np.max(parent_visible_outdegs)) if parent_visible_outdegs else 0.0,
+        "parent_outdeg_sum": float(np.sum(parent_visible_outdegs)) if parent_visible_outdegs else 0.0,
+        "parent_depth_max": float(np.max(parent_depths)) if parent_depths else 0.0,
+        "parent_descendant_count_seen_max": float(np.max(parent_visible_desc_counts))
+        if parent_visible_desc_counts
+        else 0.0,
+        "parent_descendant_count_seen_mean": float(np.mean(parent_visible_desc_counts))
+        if parent_visible_desc_counts
+        else 0.0,
+        "parent_diversity": float(parent_diversity),
+        "parent_lca_depth_pairwise_mean": float(np.mean(lca_vals)) if lca_vals else 0.0,
+        "parent_beta_max": float(np.max(parent_beta_vals)) if parent_beta_vals else 0.0,
+        "upstream_2hop_node_count": float(upstream_n),
+        "upstream_2hop_edge_density": float(upstream_m / (upstream_n * (upstream_n - 1)))
+        if upstream_n > 1
+        else 0.0,
+        "parent_module_entropy": float(module_entropy),
+    }
+    return {name: float(safe_feature_values.get(name, 0.0)) for name in feature_names}
 
 
 # Feature computation functions
@@ -945,29 +1088,32 @@ def create_dataset(G_dag: nx.DiGraph, depth: Dict[str, int], targets: Dict[str, 
         nodes: List of node identifiers
         feature_names: List of feature names
     """
-    params = feature_cfg.get("params", {})
-    strict_past = bool(params.get("strict_past_seen_graph", True))
-    H_seen = build_seen_graph(G_dag, depth, d, strict_past=strict_past)
-    
     V_d = [v for v in G_dag.nodes() if depth.get(v, 0) == d]
     feature_names = resolve_feature_set(feature_cfg, r)
-    
-    ctx = FeatureContext(G_dag=G_dag, H_seen=H_seen, depth=depth, d=d, params=params)
-    
+
     X = []
     Y1 = []
     Y2 = []
     Z1 = []
     Z2 = []
     nodes = []
+    descendants_cache: Dict = {}
+    ancestors_cache: Dict = {}
     
     if HAS_TQDM:
-        pbar = tqdm(V_d, desc=f"features d={d} r={r}")
+        pbar = tqdm(V_d, desc=f"protocol2 features d={d} r={r}")
     else:
         pbar = V_d
     
     for v in pbar:
-        features = compute_feature_vector(ctx, v, feature_names)
+        features = compute_feature_vector_masked(
+            G_dag=G_dag,
+            depth=depth,
+            v=v,
+            feature_names=feature_names,
+            descendants_cache=descendants_cache,
+            ancestors_cache=ancestors_cache,
+        )
         X.append(features)
         Y1.append(int(targets[v]["Y1"]))
         Y2.append(int(targets[v]["Y2"]))
@@ -1502,8 +1648,8 @@ def generate_visualization_plots(all_results: List[Dict]):
     ax4.legend()
     
     plt.tight_layout()
-    plt.savefig(FIGS_DIR / "prediction_performance_summary.png", dpi=300, bbox_inches='tight')
-    plt.savefig(FIGS_DIR / "prediction_performance_summary.pdf", bbox_inches='tight')
+    plt.savefig(FIGS_DIR / "2_prediction_performance_summary.png", dpi=300, bbox_inches='tight')
+    plt.savefig(FIGS_DIR / "2_prediction_performance_summary.pdf", bbox_inches='tight')
     plt.close()
     
     # 2. Observed vs Predicted scatter plots (for best depth)
@@ -1592,8 +1738,8 @@ def generate_visualization_plots(all_results: List[Dict]):
                 ax4.grid(True, alpha=0.3, axis='y')
         
         plt.tight_layout()
-        plt.savefig(FIGS_DIR / f"observed_vs_predicted_d{best_d}.png", dpi=300, bbox_inches='tight')
-        plt.savefig(FIGS_DIR / f"observed_vs_predicted_d{best_d}.pdf", bbox_inches='tight')
+        plt.savefig(FIGS_DIR / f"2_observed_vs_predicted_d{best_d}.png", dpi=300, bbox_inches='tight')
+        plt.savefig(FIGS_DIR / f"2_observed_vs_predicted_d{best_d}.pdf", bbox_inches='tight')
         plt.close()
         print(f"  Generated observed vs predicted plots (d={best_d})")
     
@@ -1634,8 +1780,8 @@ def generate_visualization_plots(all_results: List[Dict]):
         ax.set_title('Top 15 Feature Importances (r=0, averaged across depths)', fontsize=13)
         ax.grid(True, alpha=0.3, axis='x')
         plt.tight_layout()
-        plt.savefig(FIGS_DIR / "feature_importance.png", dpi=300, bbox_inches='tight')
-        plt.savefig(FIGS_DIR / "feature_importance.pdf", bbox_inches='tight')
+        plt.savefig(FIGS_DIR / "2_feature_importance.png", dpi=300, bbox_inches='tight')
+        plt.savefig(FIGS_DIR / "2_feature_importance.pdf", bbox_inches='tight')
         plt.close()
         print(f"  Generated feature importance plot")
     
@@ -1730,7 +1876,8 @@ def main():
     d_values = [d for d in d_values if d <= max_depth_val]
     
     print(f"\nEvaluating with depth values: {d_values}")
-    print(f"Radius values: r in {{0, 1, 2}}")
+    print("Protocol 2: compute non-cheating features on G - descendants(v)")
+    print("Radius values: r in {0} only")
     
     all_results = []
     
@@ -1739,13 +1886,10 @@ def main():
         print(f"Depth d = {d}")
         print(f"{'='*80}")
         
-        # Create H_d (observed graph)
-        nodes_in_Hd = [v for v in G_dag.nodes() if depth.get(v, 0) <= d]
-        H_d = G_dag.subgraph(nodes_in_Hd).copy()
-        
         # Create V_d (frontier nodes)
         V_d = {v for v in G_dag.nodes() if depth.get(v, 0) == d}
         
+        nodes_in_Hd = [v for v in G_dag.nodes() if depth.get(v, 0) <= d]
         print(f"  H_d nodes: {len(nodes_in_Hd):,}")
         print(f"  V_d (frontier) nodes: {len(V_d):,}")
         
@@ -1753,7 +1897,7 @@ def main():
             print(f"  Skipping d={d}: too few frontier nodes ({len(V_d)})")
             continue
         
-        for r in [0, 1, 2]:
+        for r in [0]:
             print(f"\n  {'-'*76}")
             print(f"  Radius r = {r}")
             print(f"  {'-'*76}")
@@ -1810,12 +1954,12 @@ def main():
                                                    X_test, Y1_test, Y2_test, Z1_test, Z2_test,
                                                    feature_names, r)
             
-            # For r=0, also do cascaded prediction (use predicted Y2 to predict Y1)
-            if r == 0:
-                cascaded_results = cascaded_prediction_y1_from_y2(X_train, Y1_train, Y2_train, Z1_train,
-                                                                  X_test, Y1_test, Y2_test, Z1_test,
-                                                                  feature_names)
-                results.update(cascaded_results)
+            # Cascaded prediction remains valid here because predicted Y2 is inferred
+            # from masked non-cheating features rather than observed descendants.
+            cascaded_results = cascaded_prediction_y1_from_y2(X_train, Y1_train, Y2_train, Z1_train,
+                                                              X_test, Y1_test, Y2_test, Z1_test,
+                                                              feature_names)
+            results.update(cascaded_results)
             
             # Store results
             result_row = {
@@ -1908,8 +2052,8 @@ def main():
                 print(f"{d:<10} {y2_class:<10} {cw['n_samples']:<8} {spearman_str:<12} {mae_str:<12} {mean_true_str:<12} {mean_pred_str:<12}")
     
     # Save results to JSON
-    out_path = CACHE_DIR / f"{FVS_CACHE_PREFIX}results.json"
-    CACHE_DIR.mkdir(exist_ok=True)
+    out_path = DATA_DIR / f"{FVS_CACHE_PREFIX}results.json"
+    DATA_DIR.mkdir(exist_ok=True)
     try:
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(all_results, f, indent=2)

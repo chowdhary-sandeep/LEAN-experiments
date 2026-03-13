@@ -1,0 +1,17 @@
+feature,importance
+parent_diversity,0.11698104031690255
+upstream_2hop_edge_density,0.11224517078344814
+upstream_2hop_node_count,0.09640109090624831
+parent_module_entropy,0.09297415615674465
+parentset_similarity_topk_max,0.09116316560798776
+parent_descendant_count_seen_max,0.08502770670504738
+parent_indeg_max,0.08413128370350524
+parent_beta_max,0.07020882958791698
+parentset_cooccurrence_max,0.06168012410853235
+parent_outdeg_max,0.06058761530910379
+indeg_seen,0.058526557138357804
+parent_wcc_entropy,0.0372068889902421
+parent_lca_depth_pairwise_mean,0.03286637068596293
+parent_depth_max,0.0
+depth,0.0
+parentset_rarity_exact,0.0

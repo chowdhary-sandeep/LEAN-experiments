@@ -1,0 +1,17 @@
+{
+  "data_files": [
+    "2_intermediate_analysis_summary.md",
+    "2_intermediate_feature_correlations_r0.csv",
+    "2_intermediate_feature_correlations_r0_summary.csv",
+    "2_intermediate_repeated_split_metrics_r0.csv",
+    "2_intermediate_repeated_split_summary_r0.csv",
+    "2_intermediate_target_structure.csv",
+    "2_intermediate_y1_by_y2_bucket.csv",
+    "2_intermediate_y2_feature_importance_r0.csv",
+    "2_intermediate_y2_feature_importance_r0_summary.csv"
+  ],
+  "figure_files": [
+    "2_intermediate_target_and_stability.png",
+    "2_intermediate_y2_feature_importance_r0.png"
+  ]
+}

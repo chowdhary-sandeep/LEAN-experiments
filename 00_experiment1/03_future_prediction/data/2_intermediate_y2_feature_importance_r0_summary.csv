@@ -1,0 +1,13 @@
+feature,importance
+parent_descendant_count_seen_max,0.2926992627565428
+parent_diversity,0.11044888885238928
+parent_outdeg_max,0.10850241880384137
+upstream_2hop_edge_density,0.09613262817682518
+parent_beta_max,0.08717475819661924
+parent_module_entropy,0.0854332351338797
+upstream_2hop_node_count,0.06706460331414503
+parent_indeg_max,0.06453067797700054
+indeg_seen,0.0609258963428902
+parent_lca_depth_pairwise_mean,0.02708763044586659
+parent_depth_max,0.0
+depth,0.0
