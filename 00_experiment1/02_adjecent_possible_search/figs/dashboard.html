@@ -1,0 +1,1737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Discovery Dynamics — Adjacent Possible in Formal Mathematics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #080c14;
+    --surface: #0f1623;
+    --card: #161f2e;
+    --text: #dde4f0;
+    --muted: #7a8899;
+    --accent: #f0a500;
+    --accent-dim: #f0a50015;
+    --border: #1e2a3a;
+    --border-light: #253447;
+    --green: #2D8A6E;
+    --blue: #4A90D9;
+    --red: #D94A4A;
+    --grey: #8899aa;
+    --transition: 180ms ease;
+    --header-h: 48px;
+    --tabs-h: 40px;
+    --footer-h: 40px;
+  }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    overflow: hidden;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--surface); }
+  ::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+  /* ── HEADER ── */
+  #header {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: var(--header-h);
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px;
+    z-index: 100;
+  }
+  #header-left { display: flex; align-items: baseline; gap: 12px; }
+  #header-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 18px;
+    letter-spacing: -0.3px;
+    color: var(--text);
+  }
+  #header-title span { color: var(--accent); }
+  #header-subtitle {
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 0.5px;
+  }
+  #header-badge {
+    font-size: 10px;
+    color: var(--muted);
+    border: 1px solid var(--border-light);
+    padding: 3px 10px;
+    border-radius: 3px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  /* ── TAB BAR ── */
+  #tabbar {
+    position: fixed;
+    top: var(--header-h); left: 0; right: 0;
+    height: var(--tabs-h);
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: stretch;
+    padding: 0 24px;
+    gap: 0;
+    z-index: 99;
+  }
+  .tab-btn {
+    background: none; border: none;
+    color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    padding: 0 18px;
+    cursor: pointer;
+    position: relative;
+    transition: color var(--transition);
+    white-space: nowrap;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active {
+    color: var(--accent);
+  }
+  .tab-btn.active::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 2px 2px 0 0;
+  }
+  .tab-num {
+    color: var(--border-light);
+    margin-right: 6px;
+    font-size: 9px;
+  }
+  .tab-btn.active .tab-num { color: var(--accent); opacity: 0.6; }
+
+  /* ── CONTENT AREA ── */
+  #content-area {
+    position: fixed;
+    top: calc(var(--header-h) + var(--tabs-h));
+    left: 0; right: 0;
+    bottom: var(--footer-h);
+    overflow: hidden;
+  }
+
+  .tab-panel {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: flex;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(8px);
+    transition: opacity var(--transition), transform var(--transition);
+  }
+  .tab-panel.active {
+    opacity: 1;
+    pointer-events: all;
+    transform: translateY(0);
+  }
+
+  /* ── CHART COLUMN ── */
+  .chart-col {
+    flex: 0 0 65%;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 12px 12px 20px;
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .chart-header { margin-bottom: 10px; flex-shrink: 0; }
+  .chart-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--text);
+    letter-spacing: -0.2px;
+    line-height: 1.2;
+  }
+  .chart-subtitle {
+    color: var(--muted);
+    font-size: 10.5px;
+    margin-top: 3px;
+    letter-spacing: 0.3px;
+  }
+  .chart-container {
+    flex: 1;
+    min-height: 0;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .plotly-chart {
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  /* ── RIGHT PANEL ── */
+  .right-col {
+    flex: 0 0 35%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .right-panel {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 18px;
+  }
+  .panel-section {
+    margin-bottom: 20px;
+  }
+  .panel-section + .panel-section {
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+  }
+  .panel-section-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 600;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+  .panel-text {
+    color: var(--muted);
+    font-size: 11.5px;
+    line-height: 1.7;
+  }
+  .panel-text p { margin-bottom: 8px; }
+  .panel-text p:last-child { margin-bottom: 0; }
+  .panel-text strong { color: var(--text); font-weight: 500; }
+  .panel-text em { color: var(--accent); font-style: normal; }
+
+  /* Legend items */
+  .legend-list { list-style: none; }
+  .legend-list li {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.6;
+    padding: 3px 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .legend-swatch {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    margin-top: 3px;
+  }
+  .legend-list .sub {
+    padding-left: 18px;
+    font-size: 10.5px;
+    color: #5a6a7a;
+  }
+  .legend-list .sub::before { content: '·  '; color: var(--border-light); }
+
+  /* Callout box */
+  .callout {
+    border-left: 2px solid var(--accent);
+    background: var(--accent-dim);
+    padding: 10px 12px;
+    border-radius: 0 4px 4px 0;
+    margin: 10px 0;
+  }
+  .callout-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 600;
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 5px;
+  }
+  .callout p {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.6;
+    margin: 0;
+  }
+  .callout strong { color: var(--text); }
+
+  /* Interp bullets */
+  .interp-list { list-style: none; }
+  .interp-list li {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.65;
+    margin-bottom: 10px;
+    padding-left: 12px;
+    position: relative;
+  }
+  .interp-list li::before {
+    content: '▸';
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+    font-size: 8px;
+    top: 3px;
+  }
+  .interp-list li strong { color: var(--text); }
+  .interp-list li em { color: var(--accent); font-style: normal; }
+
+  /* ── FOOTER ── */
+  #footer {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: var(--footer-h);
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center;
+    padding: 0 24px;
+    z-index: 100;
+  }
+  #footer-meta {
+    color: var(--muted);
+    font-size: 10px;
+    letter-spacing: 0.5px;
+  }
+  #footer-meta span { color: var(--border-light); margin: 0 8px; }
+
+  /* ── FAB ── */
+  #fab {
+    position: fixed;
+    bottom: calc(var(--footer-h) + 16px);
+    right: 20px;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #080c14;
+    border: none;
+    cursor: pointer;
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 200;
+    transition: transform var(--transition), box-shadow var(--transition);
+    box-shadow: 0 2px 12px rgba(240,165,0,0.3);
+  }
+  #fab:hover {
+    transform: scale(1.08);
+    box-shadow: 0 4px 20px rgba(240,165,0,0.5);
+  }
+
+  /* ── MODAL ── */
+  #modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition);
+  }
+  #modal-overlay.open {
+    opacity: 1;
+    pointer-events: all;
+  }
+  #modal-card {
+    width: min(800px, 92vw);
+    max-height: 80vh;
+    background: var(--surface);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transform: translateY(12px);
+    transition: transform var(--transition);
+  }
+  #modal-overlay.open #modal-card { transform: translateY(0); }
+  #modal-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  #modal-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--accent);
+  }
+  #modal-close {
+    background: none; border: none;
+    color: var(--muted); cursor: pointer;
+    font-size: 20px; line-height: 1;
+    transition: color var(--transition);
+    padding: 2px 6px;
+  }
+  #modal-close:hover { color: var(--text); }
+  #modal-body {
+    overflow-y: auto;
+    padding: 20px;
+    flex: 1;
+  }
+  #modal-body h3 {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-top: 20px;
+    margin-bottom: 8px;
+  }
+  #modal-body h3:first-child { margin-top: 0; }
+  #modal-body p {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.8;
+    margin-bottom: 10px;
+  }
+  #modal-body strong { color: var(--text); }
+  #modal-body code {
+    background: var(--card);
+    padding: 1px 5px;
+    border-radius: 2px;
+    color: var(--accent);
+    font-size: 11px;
+  }
+
+  /* Stat grid in dilution panel */
+  .stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin: 10px 0;
+  }
+  .stat-cell {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 10px;
+  }
+  .stat-label {
+    font-size: 9px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
+  .stat-value {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--accent);
+  }
+  .stat-sub {
+    font-size: 9px;
+    color: var(--muted);
+    margin-top: 1px;
+  }
+
+  /* Color chips for legend */
+  .chip-bfs { background: #8899aa; }
+  .chip-dfs { background: #2D8A6E; }
+  .chip-random { background: #4A90D9; }
+  .chip-greedy { background: #D94A4A; }
+  .chip-mincost { background: #9B59B6; }
+  .chip-efficient { background: #E67E22; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header id="header">
+  <div id="header-left">
+    <div id="header-title">Discovery <span>Dynamics</span></div>
+    <div id="header-subtitle">Adjacent Possible in Formal Mathematics</div>
+  </div>
+  <div id="header-badge">Mathlib · LeanDojo · 2024</div>
+</header>
+
+<!-- TAB BAR -->
+<nav id="tabbar">
+  <button class="tab-btn active" data-tab="0" onclick="switchTab(0)">
+    <span class="tab-num">01</span>Phase Transition
+  </button>
+  <button class="tab-btn" data-tab="1" onclick="switchTab(1)">
+    <span class="tab-num">02</span>Dilution
+  </button>
+  <button class="tab-btn" data-tab="2" onclick="switchTab(2)">
+    <span class="tab-num">03</span>Recall Gain
+  </button>
+  <button class="tab-btn" data-tab="3" onclick="switchTab(3)">
+    <span class="tab-num">04</span>Recall Fraction
+  </button>
+  <button class="tab-btn" data-tab="4" onclick="switchTab(4)">
+    <span class="tab-num">05</span>Cross-Recall Heatmap
+  </button>
+  <button class="tab-btn" data-tab="5" onclick="switchTab(5)">
+    <span class="tab-num">06</span>Cost Budget
+  </button>
+</nav>
+
+<!-- CONTENT -->
+<main id="content-area">
+
+  <!-- TAB 1: Phase Transition -->
+  <section class="tab-panel active" id="panel-0">
+    <div class="chart-col">
+      <div class="chart-header">
+        <div class="chart-title">Memory Phase Transition — All Recall Modes</div>
+        <div class="chart-subtitle">Coverage at 60k compute steps · K = 50 to 100k · K ≥ 100k = full corpus in memory (no constraint)</div>
+      </div>
+      <div class="chart-container">
+        <div id="chart-efg" class="plotly-chart"></div>
+      </div>
+    </div>
+    <div class="right-col">
+      <div class="right-panel">
+        <div class="panel-section">
+          <div class="panel-section-title">Why This Metric</div>
+          <div class="panel-text">
+            <p>Memory K is the number of theorems the agent can hold simultaneously. Real automated theorem provers (ATPs) operate under strict memory budgets — GPU VRAM, proof state cache, retriever index size.</p>
+            <p>This experiment asks: given a fixed compute budget (60k proof attempts), how does memory capacity determine what fraction of a 99,412-theorem corpus you can prove? The coverage curve as a function of K is the <strong>"memory scaling law"</strong> for proof discovery.</p>
+            <p><strong>Range:</strong> K = 50 to 100,000. The corpus has 99,412 theorems, so K ≥ 100k means all theorems fit in memory simultaneously — the memory constraint vanishes and no further phase transition occurs. The axis is capped here.</p>
+          </div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-section-title">Legend</div>
+          <div class="panel-text">
+            <p><strong>Color = exploration strategy</strong></p>
+            <ul class="legend-list">
+              <li><span class="legend-swatch chip-bfs"></span> <span><strong style="color:#8899aa">BFS</strong> (grey): Breadth-first — prove theorems in order of dependency depth</span></li>
+              <li><span class="legend-swatch chip-dfs"></span> <span><strong style="color:#2D8A6E">DFS</strong> (teal): Depth-first — push deep into dependency chains</span></li>
+              <li><span class="legend-swatch chip-random"></span> <span><strong style="color:#4A90D9">Random</strong> (blue): Uniform random selection from currently-provable theorems</span></li>
+              <li><span class="legend-swatch chip-greedy"></span> <span><strong style="color:#D94A4A">Greedy</strong> (red): At each step, pick the theorem that unlocks the most new theorems</span></li>
+            </ul>
+            <br>
+            <p><strong>Shape = recall mode</strong></p>
+            <ul class="legend-list">
+              <li>○ <strong>none</strong>: stop — agent halts when it runs out of provable theorems</li>
+              <li>■ <strong>matched</strong>: strategy-specific recall (BFS=oldest, DFS=newest, Random=random, Greedy=unblock)</li>
+              <li>▲ <strong>hub_global</strong>: always recall the highest global out-degree theorem (oracle knowledge)</li>
+              <li>▽ <strong>hub_local</strong>: always recall the highest local out-degree theorem (visible subgraph only)</li>
+            </ul>
+            <div class="callout" style="margin-top:10px">
+              <div class="callout-title">Note</div>
+              <p>"matched" conceals 4 different policies. <strong>Greedy+matched = real planning (unblock). BFS+matched = FIFO. DFS+matched = LIFO. Random+matched = random recall.</strong></p>
+            </div>
+          </div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-section-title">Interpretation</div>
+          <ul class="interp-list">
+            <li><strong>K &lt; 1,000 (tiny memory):</strong> All curves collapse near baseline (48.4%). Memory so small the agent thrashes — constantly evicting theorems it just recalled. No strategy can overcome this. <em>Below a threshold, compute is wasted on recalls, not discoveries.</em></li>
+            <li><strong>1,000 &lt; K &lt; 30,000 (the interesting regime):</strong> Curves separate. Hub_global (▲) pulls ahead of matched (■) pulls ahead of none (○). Greedy (red) separates from others. Both recall strategy and exploration strategy matter. <em>This is the realistic operating regime for bounded AI provers.</em></li>
+            <li><strong>K &gt; 30,000 (large memory):</strong> All curves converge toward 97.9% ceiling. Memory constraint lifted. Differences disappear. <em>With enough memory, strategy is irrelevant — raw compute dominates.</em> Axis is capped at K=100k (≥ corpus size); beyond that, memory is unconstrained by definition.</li>
+            <li><strong>hub_global above hub_local:</strong> Gap quantifies the oracle information premium. A prover knowing the full library's dependency structure outperforms one limited to local exploration. Gap narrows as K grows.</li>
+            <li><strong>Greedy consistently above others:</strong> Frontier-aware exploration has independent value from recall strategy. Even Greedy+none outperforms BFS+matched at mid-K.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB 2: Dilution -->
+  <section class="tab-panel" id="panel-1">
+    <div class="chart-col">
+      <div class="chart-header">
+        <div class="chart-title">Dilution &amp; Accessibility Distribution</div>
+        <div class="chart-subtitle">|Adjacent Possible| at moment of discovery · BFS steps to become provable</div>
+      </div>
+      <div class="chart-container">
+        <div id="chart-dilution" class="plotly-chart"></div>
+      </div>
+    </div>
+    <div class="right-col">
+      <div class="right-panel">
+        <div class="panel-section">
+          <div class="panel-section-title">Why This Metric</div>
+          <div class="panel-text">
+            <p>"Dilution" measures selection difficulty — when a theorem becomes provable, how many other theorems are also provable at that moment?</p>
+            <p>A theorem with <strong>dilution=1</strong> becomes uniquely provable in isolation. A theorem with <strong>dilution=18,000</strong> competes with 18,000 alternatives the instant it unlocks.</p>
+            <p>High dilution means the proof space is saturated and selection is nearly random at the moment of discovery. This is the <strong>"needle in a haystack"</strong> problem for theorem proving.</p>
+          </div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-section-title">Key Statistics</div>
+          <div class="stat-grid">
+            <div class="stat-cell">
+              <div class="stat-label">Mean Dilution</div>
+              <div class="stat-value">9,789</div>
+              <div class="stat-sub">theorems competing at discovery</div>
+            </div>
+            <div class="stat-cell">
+              <div class="stat-label">Max Dilution</div>
+              <div class="stat-value">18,269</div>
+              <div class="stat-sub">frontier peak width</div>
+            </div>
+            <div class="stat-cell">
+              <div class="stat-label">Mean Accessibility</div>
+              <div class="stat-value">1.84</div>
+              <div class="stat-sub">BFS steps from roots</div>
+            </div>
+            <div class="stat-cell">
+              <div class="stat-label">Corpus Size</div>
+              <div class="stat-value">99,412</div>
+              <div class="stat-sub">total Mathlib theorems</div>
+            </div>
+          </div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-section-title">Legend</div>
+          <div class="panel-text">
+            <ul class="legend-list">
+              <li><strong>Dilution</strong> = |Adjacent Possible| at the moment theorem T first becomes provable</li>
+              <li><strong>Accessibility</strong> = how many BFS steps from root theorems until T's prerequisites are met</li>
+              <li>Mean dilution ≈ 9,789: a typical theorem is "diluted" among ~10,000 alternatives</li>
+              <li>Max dilution = 18,269: this theorem became provable exactly when the frontier peaked</li>
+            </ul>
+          </div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-section-title">Interpretation</div>
+          <div class="callout">
+            <div class="callout-title">Key Finding</div>
+            <p>Mathlib theorems are both <strong>structurally shallow</strong> (mean 1.84 BFS steps) AND <strong>buried in noise</strong> (mean dilution 9,789). The difficulty is not logical depth — it's selective attention.</p>
+          </div>
+          <ul class="interp-list" style="margin-top:10px">
+            <li><strong>Right-skewed dilution (mean 9,789, max 18,269):</strong> Most theorems enter a crowded frontier. Mathematical theory-building does not consist of obvious "next steps" — the frontier is always wide and alternatives abundant.</li>
+            <li><strong>Shallow accessibility (mean 1.84 BFS steps):</strong> Despite dilution, most theorems are structurally close to the roots. The Mathlib DAG is wide, not deep. Difficulty is navigating a wide but shallow possibility space.</li>
+            <li><strong>These two facts together:</strong> Reframes ATP from a search-depth problem to a retrieval/selection problem. A good prover needs selective attention, not deep reasoning.</li>
+            <li><strong>If dilution were low (near 1):</strong> Proof discovery would be nearly deterministic. No selection strategy would matter. The finding that dilution ≈ 10k is precisely why strategy matters at all.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB 3: Recall Gain -->
+  <section class="tab-panel" id="panel-2">
+    <div class="chart-col">
+      <div class="chart-header">
+        <div class="chart-title">Recall Gain — Marginal Coverage Contribution of Memory Management</div>
+        <div class="chart-subtitle">Coverage(with recall) − Coverage(no recall) · same strategy, same K, same budget</div>
+      </div>
+      <div class="chart-container">
+        <div id="chart-gain" class="plotly-chart"></div>
+      </div>
+    </div>
+    <div class="right-col">
+      <div class="right-panel">
+        <div class="panel-section">
+          <div class="panel-section-title">Why This Metric</div>
+          <div class="panel-text">
+            <p>Raw coverage tells you total success. Coverage gain isolates the <strong>marginal contribution of the recall mechanism</strong> — holding exploration strategy constant.</p>
+            <p>If recall gain &gt; 0, recalling evicted theorems into memory helps. If recall gain = 0, memory was never a bottleneck. This is the <strong>ablation study for memory management</strong>.</p>
+          </div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-section-title">Legend</div>
+          <div class="panel-text">
+            <p>Coverage gain = coverage(with recall) − coverage(no recall), at K for same budget</p>
+            <ul class="legend-list" style="margin-top:8px">
+              <li><span class="legend-swatch chip-bfs"></span> <span>BFS (grey) — 3 series: matched (■), hub_global (▲), hub_local (▽)</span></li>
+              <li><span class="legend-swatch chip-dfs"></span> <span>DFS (teal) — 3 series: matched (■), hub_global (▲), hub_local (▽)</span></li>
+              <li><span class="legend-swatch chip-random"></span> <span>Random (blue) — 3 series: matched (■), hub_global (▲), hub_local (▽)</span></li>
+              <li><span class="legend-swatch chip-greedy"></span> <span>Greedy (red) — 3 series: matched (■), hub_global (▲), hub_local (▽)</span></li>
+            </ul>
+          </div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-section-title">Interpretation</div>
+          <div class="callout">
+            <div class="callout-title">Key Finding</div>
+            <p><strong>Peak gain at K ≈ 5,000–50,000</strong>. This is the "sweet spot" where memory is constrained but not catastrophically small. Below 1k, recall is pure overhead (thrashing). Above 100k, memory holds everything.</p>
+          </div>
+          <ul class="interp-list" style="margin-top:10px">
+            <li><strong>Greedy dominates (gain up to +18pp):</strong> Greedy+matched achieves the largest gains because greedy's "recall" strategy is locally optimal (unblock). Not just recall helping — it's the combination of smart exploration and smart retrieval.</li>
+            <li><strong>hub_global &gt; hub_local in most regimes:</strong> The oracle premium is real. Knowing the full graph's degree structure produces better recall decisions. Practical implication: approximate global library statistics could substitute for oracle knowledge.</li>
+            <li><strong>hub_local is noisy:</strong> Local structural signals are unreliable for recall. The agent's partial exploration gives unstable estimates of theorem importance. <em>Don't build retrievers relying solely on local connectivity.</em></li>
+            <li><strong>Gain → 0 at large K:</strong> As K increases, recall is never triggered. All gain curves return to 0 at K ≥ 100k. This confirms the measurement is well-calibrated.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB 4: Recall Fraction -->
+  <section class="tab-panel" id="panel-3">
+    <div class="chart-col">
+      <div class="chart-header">
+        <div class="chart-title">Recall Fraction — Compute Overhead Tax of Memory Management</div>
+        <div class="chart-subtitle">Recalls / Total Steps at 60k budget · fraction of compute spent managing memory vs discovering</div>
+      </div>
+      <div class="chart-container">
+        <div id="chart-frac" class="plotly-chart"></div>
+      </div>
+    </div>
+    <div class="right-col">
+      <div class="right-panel">
+        <div class="panel-section">
+          <div class="panel-section-title">Why This Metric</div>
+          <div class="panel-text">
+            <p>Recall fraction = fraction of compute budget spent on recalls rather than discoveries. It's the <strong>"overhead tax"</strong> of memory management.</p>
+            <p>If recall fraction = 0.9, the agent spends 90% of its 60k budget just shuffling theorems in and out of memory, leaving only 10% for actual proof search. This metric diagnoses whether a recall strategy is <strong>efficient or wasteful</strong>.</p>
+          </div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-section-title">Legend</div>
+          <div class="panel-text">
+            <p>Recall fraction = recalls / (discoveries + recalls), at 60k budget</p>
+            <ul class="legend-list" style="margin-top:8px">
+              <li>Near 1.0 = memory too small, agent is thrashing</li>
+              <li>Near 0.0 = memory large enough, recalls rarely needed</li>
+              <li>Crossover at ~50%: roughly equal time exploring and recalling</li>
+            </ul>
+          </div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-section-title">Interpretation</div>
+          <div class="callout">
+            <div class="callout-title">Key Finding</div>
+            <p>Crossover at <strong>K ≈ 30,000–50,000</strong> marks the "working memory threshold" for the Mathlib theorem graph. Below: memory limited, recalls dominate. Above: memory sufficient, recalls nearly absent.</p>
+          </div>
+          <ul class="interp-list" style="margin-top:10px">
+            <li><strong>Small K (&lt; 1,000): recall fraction 80–99%:</strong> Nearly all compute spent on recalls. Only 1–20% of steps are actual discoveries. Below K ≈ 1,000, recall strategies provide marginal benefit because there's barely any discovery happening.</li>
+            <li><strong>DFS matched drops to near-0 much earlier (K ≈ 2,000):</strong> DFS+matched = LIFO recall. Since DFS explores deep chains, recently evicted theorems are often not useful. DFS effectively has very low recall utility.</li>
+            <li><strong>hub_local has higher recall fraction than hub_global at same K:</strong> Local hub selection wastes more steps on unproductive recalls (unstable priorities). <em>Explains why hub_local coverage gain is noisy.</em></li>
+            <li><strong>Uniformly high recall fraction would mean:</strong> Every memory size is constrained and recall mode selection matters uniformly. The existence of a crossover confirms a natural "capacity threshold."</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB 5: Heatmap -->
+  <section class="tab-panel" id="panel-4">
+    <div class="chart-col">
+      <div class="chart-header">
+        <div class="chart-title">Cross-Recall Experiment — Recall Strategy Decoupled from Exploration</div>
+        <div class="chart-subtitle">Coverage at K=10,000, @60k budget · Each cell = independent run · All strategy × recall combinations</div>
+      </div>
+      <div class="chart-container">
+        <div id="chart-heatmap" class="plotly-chart"></div>
+      </div>
+    </div>
+    <div class="right-col">
+      <div class="right-panel">
+        <div class="panel-section">
+          <div class="panel-section-title">Why This Metric</div>
+          <div class="panel-text">
+            <p>Previous experiments coupled recall strategy to exploration strategy (BFS always used FIFO recall, Greedy always used unblock). This obscured the real question: <strong>does the "unblock" recall strategy help BFS too?</strong></p>
+            <p>This 4×6 grid runs every combination independently, breaking the coupling. It's the <strong>critical experiment for isolating the contribution of recall strategy</strong>.</p>
+          </div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-section-title">Legend</div>
+          <div class="panel-text">
+            <p><strong>Rows</strong>: exploration strategy (how the agent chooses what to prove next)</p>
+            <p style="margin-top:8px"><strong>Columns</strong>: recall strategy (what to do when memory is full)</p>
+            <ul class="legend-list" style="margin-top:6px">
+              <li><strong>none</strong>: No recall — pure exploration baseline.</li>
+              <li><strong>FIFO</strong>: Recall the oldest theorem ever known. "Remember ancient results."</li>
+              <li><strong>LIFO</strong>: Recall the most recently evicted theorem. "Remember recent results."</li>
+              <li><strong>random</strong>: Recall a uniformly random evicted theorem. Unstructured baseline.</li>
+              <li><em>⭐ unblock</em>: Recall the theorem that would immediately unblock the most adjacent-possible theorems. Locally optimal recall. The "smart librarian" strategy.</li>
+              <li><strong>hub_local</strong>: Recall the theorem with the most successors visible in the agent's discovered subgraph. Structural recall, no oracle.</li>
+            </ul>
+            <div class="callout" style="margin-top:10px">
+              <div class="callout-title">Baseline</div>
+              <p>48.4% = what random root selection achieves with no effort. Cell value = coverage fraction at K=10,000, 60k compute budget.</p>
+            </div>
+          </div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-section-title">Interpretation</div>
+          <div class="callout">
+            <div class="callout-title">Key Finding</div>
+            <p><strong>Unblock column is nearly uniform across rows (64.5–64.7%)</strong>. All four exploration strategies achieve nearly identical coverage with unblock recall. <em>Recall strategy dominates over exploration strategy.</em></p>
+          </div>
+          <ul class="interp-list" style="margin-top:10px">
+            <li><strong>None column uniform (49.7%):</strong> Without recall, all strategies equivalent at K=10k. Memory, not exploration, is the binding constraint below crossover.</li>
+            <li><strong>FIFO helps modestly (+1–2pp):</strong> Recalling old theorems occasionally opens new chains. Not efficient but not harmful.</li>
+            <li><strong>LIFO is nearly useless:</strong> The theorem just left — it probably didn't unlock much when evicted.</li>
+            <li><strong>Random recall moderate (+4–5pp):</strong> Better than LIFO, worse than unblock. A random "read but forgotten" theorem has some chance of being useful.</li>
+            <li><strong>hub_local inconsistent (+5pp avg):</strong> Local structural signals are noisy. Better than random, worse than unblock.</li>
+            <li><em>Prescription for neural provers:</em> Invest in retrieval quality (unblock-like recall), not just better search strategies. A BFS prover with smart retrieval outperforms a Greedy prover with dumb retrieval.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB 6: Cost Budget -->
+  <section class="tab-panel" id="panel-5">
+    <div class="chart-col">
+      <div class="chart-header">
+        <div class="chart-title">Cost-Constrained Discovery — Optimal Memory Window</div>
+        <div class="chart-subtitle">cost_per_step = max(1, K) · TIME_BUDGET = 60M comp-equiv · K=1k → 60k steps (calibration)</div>
+      </div>
+      <div class="chart-container">
+        <div id="chart-cost" class="plotly-chart"></div>
+      </div>
+    </div>
+    <div class="right-col">
+      <div class="right-panel">
+        <div class="panel-section">
+          <div class="panel-section-title">Cost Model (fix.md)</div>
+          <div class="panel-text">
+            <p>Tactic application is <strong>not free</strong>. At memory K, each discovery attempt costs <em>max(1, K)</em> compilation-equivalents — the kernel checks the term against up to K premises.</p>
+            <p>With TIME_BUDGET = <strong>60 million</strong>, larger K means fewer steps:</p>
+            <ul class="legend-list" style="margin-top:6px">
+              <li>K=100 → <strong style="color:#2D8A6E">600k steps</strong> (10× more than base)</li>
+              <li>K=1,000 → <strong>60k steps</strong> (calibration point)</li>
+              <li>K=10,000 → <strong style="color:#D94A4A">6k steps</strong> (10× fewer)</li>
+              <li>K=30,000 → <strong style="color:#D94A4A">2k steps</strong> (30× fewer)</li>
+            </ul>
+          </div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-section-title">Strategies</div>
+          <div class="panel-text">
+            <p><strong>Existing (hollow diamonds in EFG):</strong></p>
+            <ul class="legend-list">
+              <li><span class="legend-swatch chip-bfs"></span> BFS · DFS · Random · Greedy — same algorithms, cost-scaled budget</li>
+            </ul>
+            <p style="margin-top:8px"><strong>New cost-aware strategies:</strong></p>
+            <ul class="legend-list">
+              <li><span class="legend-swatch chip-mincost"></span> <strong style="color:#9B59B6">min_cost</strong>: pick theorem with fewest total prerequisites (cheapest to verify)</li>
+              <li><span class="legend-swatch chip-efficient"></span> <strong style="color:#E67E22">efficient</strong>: maximise (theorems unlocked) / max(1, prereqs) — gain per unit cost</li>
+            </ul>
+            <div class="callout" style="margin-top:10px">
+              <div class="callout-title">Key Prediction</div>
+              <p>Coverage vs K becomes <strong>non-monotonic</strong>: peak at K where retrieval benefit balances step-cost penalty. <em>Too small = memory bottleneck. Too large = step bottleneck.</em></p>
+            </div>
+          </div>
+        </div>
+        <div class="panel-section">
+          <div class="panel-section-title">Results</div>
+          <div class="callout">
+            <div class="callout-title">Non-Monotonic Peak Confirmed</div>
+            <p>Coverage peaks near <strong>K ≈ 20,000</strong> (~51.4%) for all strategies, then falls as the step budget collapses. The optimal memory window is real.</p>
+          </div>
+          <ul class="interp-list" style="margin-top:10px">
+            <li><strong>Orange dashed (right axis):</strong> Steps = 60M / K — collapses 1,200× from K=50 to K=∞.</li>
+            <li><strong>K &lt; 1k:</strong> Memory bottleneck dominates. All strategies near baseline despite abundant steps.</li>
+            <li><strong>K ≈ 20k:</strong> Coverage peaks. Memory sufficient to hold most of the active frontier; steps still adequate.</li>
+            <li><strong>K &gt; 20k:</strong> Step starvation — only 2k steps at K=30k, 60 steps at K=∞. Coverage falls below baseline.</li>
+            <li><strong>hub_local recall</strong> adds +1–2pp at small-to-mid K where steps allow it. Advantage disappears at large K.</li>
+            <li><strong>min_cost &amp; efficient</strong> match or slightly exceed existing strategies — the advantage of efficiency is modest at these K values.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- FOOTER -->
+<footer id="footer">
+  <div id="footer-meta">
+    Mathlib 99,412 theorems
+    <span>·</span>
+    48,081 roots
+    <span>·</span>
+    4+2 strategies
+    <span>·</span>
+    4 recall modes
+    <span>·</span>
+    14 K values (50–100k)
+    <span>·</span>
+    4 budgets
+    <span>·</span>
+    exp3: 6 recall modes × 120 runs
+    <span>·</span>
+    cost model: 60M comp-equiv budget
+  </div>
+</footer>
+
+<!-- FAB -->
+<button id="fab" onclick="openModal()" title="Methodology notes">?</button>
+
+<!-- MODAL -->
+<div id="modal-overlay" onclick="closeModalOnBg(event)">
+  <div id="modal-card">
+    <div id="modal-header">
+      <div id="modal-title">Methodology Notes</div>
+      <button id="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div id="modal-body" id="modal-content"></div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// DATA
+// ═══════════════════════════════════════════════════════════
+const FIGURE_DATA = {
+  baseline: 0.4837,
+  ceiling: 0.9793,
+
+  efg: {
+    series: {
+      "bfs__none": { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4837,0.4837,0.4837,0.4839,0.4842,0.4857,0.4909,0.4975,0.5201,0.5608,0.6217,0.6929,0.8642,0.9793,0.9793,0.9793,0.9793] },
+      "bfs__matched": { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4837,0.4838,0.4839,0.4843,0.4851,0.4874,0.4964,0.5105,0.5624,0.6378,0.7083,0.7659,0.8734,0.9793,0.9793,0.9793,0.9793] },
+      "bfs__hub": { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4881,0.4901,0.4926,0.4992,0.5080,0.5214,0.5503,0.5979,0.6679,0.7400,0.7934,0.8071,0.9123,0.9793,0.9793,0.9793,0.9793] },
+      "bfs__hub_local": { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4840,0.4849,0.4856,0.4863,0.4948,0.5045,0.5379,0.5696,0.5963,0.5659,0.6567,0.7508,0.8939,0.9793,0.9793,0.9793,0.9793] },
+      "dfs__none": { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4837,0.4837,0.4837,0.4839,0.4842,0.4857,0.4908,0.4972,0.5183,0.5519,0.5987,0.6686,0.8429,0.9793,0.9793,0.9793,0.9793] },
+      "dfs__matched": { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4837,0.4837,0.4837,0.4839,0.4842,0.4857,0.4908,0.4972,0.5183,0.5519,0.5987,0.6686,0.8429,0.9793,0.9793,0.9793,0.9793] },
+      "dfs__hub": { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4881,0.4901,0.4926,0.4992,0.5080,0.5216,0.5502,0.5928,0.6676,0.7332,0.7936,0.7910,0.8949,0.9793,0.9793,0.9793,0.9793] },
+      "dfs__hub_local": { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4840,0.4849,0.4856,0.4863,0.4948,0.5047,0.5379,0.5694,0.5535,0.5555,0.6283,0.7138,0.8659,0.9793,0.9793,0.9793,0.9793] },
+      "random__none": { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4837,0.4837,0.4837,0.4839,0.4842,0.4857,0.4910,0.4974,0.5197,0.5571,0.6111,0.6835,0.8636,0.9793,0.9793,0.9793,0.9793] },
+      "random__matched": { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4884,0.4924,0.4972,0.4942,0.4970,0.4947,0.5063,0.5220,0.5574,0.5936,0.6540,0.7173,0.8725,0.9793,0.9793,0.9793,0.9793] },
+      "random__hub": { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4881,0.4901,0.4926,0.4992,0.5081,0.5215,0.5503,0.5930,0.6678,0.7398,0.7956,0.8032,0.9105,0.9793,0.9793,0.9793,0.9793] },
+      "random__hub_local": { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4840,0.4849,0.4856,0.4863,0.4937,0.5046,0.5367,0.5696,0.6267,0.5633,0.6478,0.7400,0.8983,0.9793,0.9793,0.9793,0.9793] },
+      "greedy__none": { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4837,0.4837,0.4837,0.4839,0.4842,0.4857,0.4911,0.4973,0.5208,0.5595,0.6235,0.7116,0.8909,0.9793,0.9793,0.9793,0.9793] },
+      "greedy__matched": { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.5289,0.5300,0.5322,0.5501,0.5657,0.5805,0.6123,0.6466,0.6973,0.7392,0.7916,0.8399,0.9412,0.9793,0.9793,0.9793,0.9793] },
+      "greedy__hub": { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.5091,0.5134,0.5129,0.5254,0.5382,0.5511,0.5871,0.6237,0.6849,0.7379,0.7947,0.8379,0.9422,0.9793,0.9793,0.9793,0.9793] },
+      "greedy__hub_local": { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4961,0.4968,0.4954,0.4927,0.4956,0.5043,0.5317,0.5467,0.5868,0.6243,0.6983,0.7890,0.9287,0.9793,0.9793,0.9793,0.9793] }
+    }
+  },
+
+  j: {
+    bfs: { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000], gain_matched: [0.0000,0.0001,0.0002,0.0005,0.0009,0.0017,0.0055,0.0130,0.0423,0.0770,0.0866,0.0730,0.0092,0.0], gain_hub: [0.0044,0.0064,0.0089,0.0154,0.0238,0.0357,0.0594,0.1005,0.1478,0.1793,0.1716,0.1142,0.0481,0.0], gain_hub_local: [0.0003,0.0012,0.0019,0.0025,0.0106,0.0189,0.0471,0.0721,0.0762,0.0051,0.0349,0.0578,0.0297,0.0] },
+    dfs: { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000], gain_matched: [0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0], gain_hub: [0.0044,0.0064,0.0089,0.0154,0.0238,0.0359,0.0594,0.0956,0.1493,0.1813,0.1949,0.1224,0.0520,0.0], gain_hub_local: [0.0003,0.0012,0.0019,0.0025,0.0106,0.0190,0.0470,0.0721,0.0352,0.0036,0.0296,0.0452,0.0230,0.0] },
+    random: { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000], gain_matched: [0.0047,0.0087,0.0135,0.0103,0.0128,0.0090,0.0153,0.0246,0.0377,0.0365,0.0429,0.0338,0.0089,0.0], gain_hub: [0.0044,0.0064,0.0089,0.0154,0.0238,0.0358,0.0593,0.0956,0.1481,0.1826,0.1845,0.1196,0.0469,0.0], gain_hub_local: [0.0003,0.0012,0.0019,0.0025,0.0095,0.0189,0.0457,0.0722,0.1070,0.0061,0.0367,0.0564,0.0347,0.0] },
+    greedy: { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000], gain_matched: [0.0453,0.0463,0.0485,0.0663,0.0814,0.0949,0.1212,0.1493,0.1765,0.1797,0.1681,0.1283,0.0502,0.0], gain_hub: [0.0254,0.0297,0.0292,0.0416,0.0540,0.0654,0.0961,0.1264,0.1641,0.1784,0.1711,0.1263,0.0513,0.0], gain_hub_local: [0.0125,0.0132,0.0117,0.0089,0.0114,0.0186,0.0407,0.0494,0.0660,0.0648,0.0748,0.0773,0.0378,0.0] }
+  },
+
+  k_frac: {
+    bfs: {
+      matched: { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000], frac: [0.992,0.957,0.951,0.902,0.897,0.847,0.790,0.771,0.674,0.621,0.587,0.532,0.098,0.0] },
+      hub: { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000], frac: [0.596,0.640,0.717,0.558,0.648,0.688,0.649,0.702,0.587,0.556,0.487,0.324,0.160,0.0] },
+      hub_local: { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000], frac: [0.953,0.958,0.944,0.923,0.946,0.930,0.910,0.858,0.746,0.194,0.311,0.184,0.084,0.0] }
+    },
+    dfs: {
+      matched: { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000], frac: [0.995,0.990,0.980,0.905,0.784,0.493,0.219,0.129,0.055,0.029,0.017,0.011,0.006,0.0] },
+      hub: { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000], frac: [0.596,0.640,0.717,0.558,0.648,0.687,0.650,0.634,0.589,0.539,0.486,0.325,0.143,0.0] },
+      hub_local: { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000], frac: [0.953,0.958,0.944,0.923,0.946,0.930,0.910,0.858,0.710,0.088,0.200,0.126,0.047,0.0] }
+    },
+    random: {
+      matched: { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000], frac: [0.944,0.928,0.936,0.936,0.932,0.903,0.897,0.890,0.841,0.734,0.698,0.613,0.203,0.0] },
+      hub: { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000], frac: [0.599,0.640,0.717,0.558,0.648,0.687,0.649,0.634,0.588,0.558,0.483,0.325,0.159,0.0] },
+      hub_local: { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000], frac: [0.953,0.958,0.944,0.923,0.940,0.930,0.908,0.858,0.763,0.173,0.276,0.157,0.144,0.0] }
+    },
+    greedy: {
+      matched: { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000], frac: [0.700,0.686,0.731,0.822,0.822,0.794,0.787,0.730,0.646,0.577,0.490,0.410,0.242,0.0] },
+      hub: { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000], frac: [0.865,0.873,0.819,0.854,0.861,0.838,0.829,0.768,0.667,0.579,0.485,0.413,0.240,0.0] },
+      hub_local: { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000], frac: [0.939,0.937,0.934,0.922,0.929,0.919,0.920,0.882,0.829,0.767,0.644,0.483,0.263,0.0] }
+    }
+  },
+
+  heatmap: {
+    strategies: ['BFS', 'DFS', 'Random', 'Greedy'],
+    recall_modes: ['none', 'FIFO', 'LIFO', 'random', 'unblock', 'hub_local'],
+    K: 10000, budget: 60000,
+    coverage: [
+      [0.4975, 0.5119, 0.4975, 0.5360, 0.6461, 0.5490],
+      [0.4972, 0.5111, 0.4973, 0.5354, 0.6457, 0.5498],
+      [0.4974, 0.5116, 0.4974, 0.5431, 0.6461, 0.5502],
+      [0.4973, 0.5113, 0.4973, 0.5137, 0.6466, 0.5495]
+    ]
+  },
+
+  // Cost-budget data — populated by experiment2_cost_budget.py
+  // steps_available is deterministic from the cost model; series requires a compute run.
+  cost_budget: {
+    time_budget: 60000000,
+    step_budget_ref: 60000,
+    norm_k: 1000,
+    K:               [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999],
+    steps_available: [1200000,600000,300000,120000,60000,30000,12000,6000,3000,2000,1500,1200,800,600,300,120,60],
+    series: {
+      // K and steps_budget identical for all series (cost model is deterministic)
+      // coverage values from experiment2_cost_budget.py run (48.7s, seed=42)
+      "bfs__none":          { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4837,0.4837,0.4837,0.4839,0.4842,0.4857,0.4909,0.4975,0.5138,0.5038,0.4987,0.4957,0.4917,0.4897,0.4867,0.4849,0.4843], steps_budget: [1200000,600000,300000,120000,60000,30000,12000,6000,3000,2000,1500,1200,800,600,300,120,60] },
+      "bfs__hub_local":     { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4843,0.4845,0.4855,0.4891,0.4904,0.4970,0.5003,0.5025,0.5138,0.5038,0.4987,0.4957,0.4917,0.4897,0.4867,0.4849,0.4843], steps_budget: [1200000,600000,300000,120000,60000,30000,12000,6000,3000,2000,1500,1200,800,600,300,120,60] },
+      "dfs__none":          { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4837,0.4837,0.4837,0.4839,0.4842,0.4857,0.4908,0.4972,0.5138,0.5038,0.4987,0.4957,0.4917,0.4897,0.4867,0.4849,0.4843], steps_budget: [1200000,600000,300000,120000,60000,30000,12000,6000,3000,2000,1500,1200,800,600,300,120,60] },
+      "dfs__hub_local":     { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4843,0.4845,0.4855,0.4891,0.4904,0.4971,0.5002,0.5023,0.5138,0.5038,0.4987,0.4957,0.4917,0.4897,0.4867,0.4849,0.4843], steps_budget: [1200000,600000,300000,120000,60000,30000,12000,6000,3000,2000,1500,1200,800,600,300,120,60] },
+      "random__none":       { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4837,0.4837,0.4837,0.4839,0.4842,0.4856,0.4911,0.4974,0.5138,0.5038,0.4987,0.4957,0.4917,0.4897,0.4867,0.4849,0.4843], steps_budget: [1200000,600000,300000,120000,60000,30000,12000,6000,3000,2000,1500,1200,800,600,300,120,60] },
+      "random__hub_local":  { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4971,0.4954,0.4948,0.4980,0.5068,0.4979,0.5021,0.5028,0.5138,0.5038,0.4987,0.4957,0.4917,0.4897,0.4867,0.4849,0.4843], steps_budget: [1200000,600000,300000,120000,60000,30000,12000,6000,3000,2000,1500,1200,800,600,300,120,60] },
+      "greedy__none":       { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4837,0.4837,0.4837,0.4839,0.4842,0.4857,0.4910,0.4973,0.5138,0.5038,0.4987,0.4957,0.4917,0.4897,0.4867,0.4849,0.4843], steps_budget: [1200000,600000,300000,120000,60000,30000,12000,6000,3000,2000,1500,1200,800,600,300,120,60] },
+      "greedy__hub_local":  { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4971,0.4936,0.4969,0.4999,0.4939,0.5078,0.5026,0.5034,0.5138,0.5038,0.4987,0.4957,0.4917,0.4897,0.4867,0.4849,0.4843], steps_budget: [1200000,600000,300000,120000,60000,30000,12000,6000,3000,2000,1500,1200,800,600,300,120,60] },
+      "min_cost__none":     { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4837,0.4837,0.4837,0.4839,0.4842,0.4857,0.4911,0.4973,0.5138,0.5038,0.4987,0.4957,0.4917,0.4897,0.4867,0.4849,0.4843], steps_budget: [1200000,600000,300000,120000,60000,30000,12000,6000,3000,2000,1500,1200,800,600,300,120,60] },
+      "min_cost__hub_local":{ K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4886,0.4933,0.4974,0.4947,0.5018,0.5069,0.5020,0.5022,0.5138,0.5038,0.4987,0.4957,0.4917,0.4897,0.4867,0.4849,0.4843], steps_budget: [1200000,600000,300000,120000,60000,30000,12000,6000,3000,2000,1500,1200,800,600,300,120,60] },
+      "efficient__none":    { K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4837,0.4837,0.4837,0.4839,0.4842,0.4856,0.4910,0.4974,0.5138,0.5038,0.4987,0.4957,0.4917,0.4897,0.4867,0.4849,0.4843], steps_budget: [1200000,600000,300000,120000,60000,30000,12000,6000,3000,2000,1500,1200,800,600,300,120,60] },
+      "efficient__hub_local":{ K: [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999], coverage: [0.4971,0.4936,0.4969,0.4999,0.4939,0.5073,0.5009,0.5026,0.5138,0.5038,0.4987,0.4957,0.4917,0.4897,0.4867,0.4849,0.4843], steps_budget: [1200000,600000,300000,120000,60000,30000,12000,6000,3000,2000,1500,1200,800,600,300,120,60] }
+    }
+  }
+};
+
+// ═══════════════════════════════════════════════════════════
+// CONSTANTS
+// ═══════════════════════════════════════════════════════════
+const STRATEGY_COLORS = { bfs: '#8899aa', dfs: '#2D8A6E', random: '#4A90D9', greedy: '#D94A4A' };
+const STRATEGY_NAMES = { bfs: 'BFS', dfs: 'DFS', random: 'Random', greedy: 'Greedy' };
+const RECALL_SYMBOLS = { none: 'circle-open', matched: 'square', hub: 'triangle-up', hub_local: 'triangle-down' };
+const RECALL_NAMES = { none: 'none', matched: 'matched', hub: 'hub_global', hub_local: 'hub_local' };
+const COST_COLORS = { bfs: '#8899aa', dfs: '#2D8A6E', random: '#4A90D9', greedy: '#D94A4A', min_cost: '#9B59B6', efficient: '#E67E22' };
+const COST_NAMES  = { bfs: 'BFS', dfs: 'DFS', random: 'Random', greedy: 'Greedy', min_cost: 'min_cost', efficient: 'efficient' };
+const COST_SYMBOLS = { none: 'diamond-open', hub_local: 'diamond' };
+
+// K-axis tick config
+// K=100k already exceeds corpus size (99,412 theorems) — full-memory regime starts here
+const K_TICKVALS = [50,100,500,1000,2000,5000,10000,20000,30000,50000,75000,100000];
+const K_TICKTEXT = ['50','100','500','1k','2k','5k','10k','20k','30k','50k','75k','100k≥N'];
+
+const DARK_TEMPLATE = {
+  paper_bgcolor: '#0f1623',
+  plot_bgcolor: '#0b1120',
+  font: { family: "'IBM Plex Mono', monospace", color: '#dde4f0', size: 11 },
+  colorway: Object.values(STRATEGY_COLORS),
+  xaxis: { gridcolor: '#1e2a3a', linecolor: '#1e2a3a', zerolinecolor: '#1e2a3a', tickfont: { size: 10 } },
+  yaxis: { gridcolor: '#1e2a3a', linecolor: '#1e2a3a', zerolinecolor: '#1e2a3a', tickfont: { size: 10 } },
+  legend: { bgcolor: 'rgba(15,22,35,0.8)', bordercolor: '#1e2a3a', borderwidth: 1, font: { size: 10 } }
+};
+
+const PLOTLY_CONFIG = { displaylogo: false, responsive: true, displayModeBar: true,
+  modeBarButtonsToRemove: ['select2d', 'lasso2d', 'autoScale2d'],
+  toImageButtonOptions: { format: 'png', width: 1200, height: 700 }
+};
+
+function applyDarkLayout(layout) {
+  return Object.assign({
+    paper_bgcolor: DARK_TEMPLATE.paper_bgcolor,
+    plot_bgcolor: DARK_TEMPLATE.plot_bgcolor,
+    font: DARK_TEMPLATE.font,
+    margin: { l: 60, r: 30, t: 30, b: 55 },
+    legend: DARK_TEMPLATE.legend,
+    xaxis: Object.assign({}, DARK_TEMPLATE.xaxis),
+    yaxis: Object.assign({}, DARK_TEMPLATE.yaxis),
+  }, layout);
+}
+
+// ═══════════════════════════════════════════════════════════
+// TAB SWITCHING
+// ═══════════════════════════════════════════════════════════
+let activeTab = 0;
+const chartsRendered = new Set();
+
+function switchTab(idx) {
+  document.querySelectorAll('.tab-btn').forEach((b, i) => {
+    b.classList.toggle('active', i === idx);
+  });
+  document.querySelectorAll('.tab-panel').forEach((p, i) => {
+    p.classList.toggle('active', i === idx);
+  });
+  activeTab = idx;
+  if (!chartsRendered.has(idx)) {
+    setTimeout(() => { renderChart(idx); chartsRendered.add(idx); }, 30);
+  }
+  updateModal();
+}
+
+function renderChart(idx) {
+  switch(idx) {
+    case 0: renderEFG(); break;
+    case 1: renderDilution(); break;
+    case 2: renderGain(); break;
+    case 3: renderFrac(); break;
+    case 4: renderHeatmap(); break;
+    case 5: renderCostBudget(); break;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// CHART 1: Phase Transition (EFG)
+// ═══════════════════════════════════════════════════════════
+function renderEFG() {
+  const traces = [];
+  const series = FIGURE_DATA.efg.series;
+  const K_ALL = [50,100,200,500,1000,2000,5000,10000,20000,30000,40000,50000,75000,100000,200000,500000,999999];
+
+  const MAX_K = 100000; // K ≥ corpus size (99,412) = full memory, no phase transition
+  for (const [key, data] of Object.entries(series)) {
+    const [strat, recall] = key.split('__');
+    const color = STRATEGY_COLORS[strat];
+    const symbol = RECALL_SYMBOLS[recall] || 'circle';
+    const recallLabel = RECALL_NAMES[recall] || recall;
+    const stratLabel = STRATEGY_NAMES[strat];
+
+    // Trim to meaningful range: K ≤ corpus size
+    const idxs = data.K.map((k, i) => i).filter(i => data.K[i] <= MAX_K);
+    const ks   = idxs.map(i => data.K[i]);
+    const covs = idxs.map(i => data.coverage[i]);
+
+    traces.push({
+      x: ks,
+      y: covs,
+      mode: 'lines+markers',
+      name: `${stratLabel} · ${recallLabel}`,
+      legendgroup: strat,
+      legendgrouptitle: strat === 'bfs' ? { text: '— Strategy', font: { size: 9, color: '#7a8899' } } : undefined,
+      line: { color, width: 1.5, dash: recall === 'none' ? 'dot' : 'solid' },
+      marker: { symbol, size: recall === 'none' ? 7 : 7, color, line: { color, width: 1.5 } },
+      hovertemplate: `<b>${stratLabel} · ${recallLabel}</b><br>K=%{x:,}<br>Coverage=%{y:.1%}<extra></extra>`,
+    });
+  }
+
+  // Reference lines
+  const shapeBase = { type: 'line', xref: 'paper', layer: 'below', line: { dash: 'dash', width: 1 } };
+
+  const layout = applyDarkLayout({
+    xaxis: {
+      type: 'log',
+      title: { text: 'Memory Size K', font: { size: 11, color: '#7a8899' } },
+      tickvals: K_TICKVALS,
+      ticktext: K_TICKTEXT,
+      gridcolor: '#1e2a3a',
+      linecolor: '#253447',
+      tickfont: { size: 10 },
+      range: [Math.log10(40), Math.log10(130000)],
+    },
+    yaxis: {
+      title: { text: 'Coverage Fraction', font: { size: 11, color: '#7a8899' } },
+      tickformat: '.0%',
+      gridcolor: '#1e2a3a',
+      linecolor: '#253447',
+      tickfont: { size: 10 },
+      range: [0.45, 1.02],
+    },
+    shapes: [
+      { ...shapeBase, x0: 0, x1: 1, y0: FIGURE_DATA.baseline, y1: FIGURE_DATA.baseline,
+        yref: 'y', line: { ...shapeBase.line, color: '#5a6a7a', width: 1 } },
+      { ...shapeBase, x0: 0, x1: 1, y0: FIGURE_DATA.ceiling, y1: FIGURE_DATA.ceiling,
+        yref: 'y', line: { ...shapeBase.line, color: '#f0a500', width: 1.5 } },
+      { type: 'line', x0: 30000, x1: 30000, y0: 0, y1: 1,
+        xref: 'x', yref: 'paper', layer: 'below',
+        line: { color: '#f0a500', width: 1, dash: 'dot' } },
+    ],
+    annotations: [
+      { x: Math.log10(40), y: FIGURE_DATA.baseline + 0.008, xref: 'x', yref: 'y',
+        text: 'baseline 48.4%', showarrow: false, xanchor: 'left',
+        font: { size: 10, color: '#7a8899', family: "'IBM Plex Mono'" } },
+      { x: Math.log10(40), y: FIGURE_DATA.ceiling - 0.012, xref: 'x', yref: 'y',
+        text: 'ceiling 97.9%', showarrow: false, xanchor: 'left',
+        font: { size: 10, color: '#f0a500', family: "'IBM Plex Mono'" } },
+      { x: Math.log10(30000), y: 0.98, xref: 'x', yref: 'y',
+        text: 'K≈30k convergence', showarrow: false, xanchor: 'left',
+        textangle: -90,
+        font: { size: 9, color: '#f0a500', family: "'IBM Plex Mono'" } },
+      { x: Math.log10(100000), y: 0.46, xref: 'x', yref: 'y',
+        text: 'K≥N', showarrow: false, xanchor: 'center',
+        font: { size: 9, color: '#5a6a7a', family: "'IBM Plex Mono'" } },
+    ],
+    legend: {
+      bgcolor: 'rgba(15,22,35,0.85)',
+      bordercolor: '#1e2a3a', borderwidth: 1,
+      font: { size: 9 },
+      x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top',
+      groupclick: 'toggleitem',
+    },
+    margin: { l: 70, r: 20, t: 20, b: 60 },
+  });
+
+  Plotly.react('chart-efg', traces, layout, PLOTLY_CONFIG);
+}
+
+// ═══════════════════════════════════════════════════════════
+// CHART 2: Dilution (Panel C)
+// ═══════════════════════════════════════════════════════════
+function renderDilution() {
+  // Left: CDF
+  const cdfX = [10, 100, 500, 1000, 2500, 5000, 9789, 15000, 18269];
+  const cdfY = [0.01, 0.05, 0.12, 0.22, 0.40, 0.60, 0.75, 0.93, 1.0];
+
+  // Right: Accessibility bar
+  const bfsX = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+  const bfsY = [0.484, 0.38, 0.09, 0.03, 0.01, 0.004, 0.001, 0.0005, 0.0002];
+
+  const traces = [
+    // CDF curve
+    {
+      x: cdfX, y: cdfY,
+      mode: 'lines+markers',
+      name: 'Dilution CDF',
+      line: { color: '#4A90D9', width: 2, shape: 'spline' },
+      marker: { size: 6, color: '#4A90D9' },
+      fill: 'tozeroy',
+      fillcolor: 'rgba(74,144,217,0.08)',
+      xaxis: 'x', yaxis: 'y',
+      hovertemplate: '|AP| ≤ %{x:,}<br>Fraction: %{y:.1%}<extra>Dilution CDF</extra>',
+    },
+    // Accessibility bars
+    {
+      x: bfsX, y: bfsY,
+      type: 'bar',
+      name: 'Accessibility',
+      marker: { color: bfsX.map(v => v <= 1 ? 'rgba(240,165,0,0.7)' : 'rgba(45,138,110,0.6)'),
+        line: { color: bfsX.map(v => v <= 1 ? '#f0a500' : '#2D8A6E'), width: 1 } },
+      xaxis: 'x2', yaxis: 'y2',
+      hovertemplate: 'BFS step %{x}<br>Fraction: %{y:.3f}<extra>Accessibility</extra>',
+    },
+  ];
+
+  const layout = applyDarkLayout({
+    grid: { rows: 1, columns: 2, pattern: 'independent' },
+    xaxis: {
+      title: { text: 'Adjacent Possible Size at Discovery', font: { size: 10, color: '#7a8899' } },
+      type: 'log',
+      tickvals: [10, 100, 1000, 5000, 10000, 18269],
+      ticktext: ['10', '100', '1k', '5k', '10k', '18k'],
+      gridcolor: '#1e2a3a', tickfont: { size: 10 },
+      domain: [0, 0.47],
+    },
+    yaxis: {
+      title: { text: 'Cumulative Fraction', font: { size: 10, color: '#7a8899' } },
+      tickformat: '.0%',
+      gridcolor: '#1e2a3a', tickfont: { size: 10 },
+      range: [0, 1.05],
+    },
+    xaxis2: {
+      title: { text: 'BFS Steps to Become Provable', font: { size: 10, color: '#7a8899' } },
+      tickvals: [0,1,2,3,4,5,6,7,8],
+      ticktext: ['0','1','2','3','4','5','6','7','8'],
+      gridcolor: '#1e2a3a', tickfont: { size: 10 },
+      domain: [0.53, 1.0],
+    },
+    yaxis2: {
+      title: { text: 'Fraction of Theorems', font: { size: 10, color: '#7a8899' } },
+      tickformat: '.3f',
+      gridcolor: '#1e2a3a', tickfont: { size: 10 },
+      anchor: 'x2',
+      type: 'log',
+      range: [Math.log10(0.00015), Math.log10(0.7)],
+    },
+    shapes: [
+      // Mean dilution line
+      { type: 'line', x0: 9789, x1: 9789, y0: 0, y1: 0.78,
+        xref: 'x', yref: 'y', line: { color: '#f0a500', dash: 'dash', width: 1.5 } },
+      // Max dilution line
+      { type: 'line', x0: 18269, x1: 18269, y0: 0, y1: 1.0,
+        xref: 'x', yref: 'y', line: { color: '#D94A4A', dash: 'dash', width: 1 } },
+      // Mean BFS line
+      { type: 'line', x0: 1.84, x1: 1.84, y0: 0, y1: 1,
+        xref: 'x2', yref: 'y2 domain', line: { color: '#f0a500', dash: 'dash', width: 1.5 } },
+    ],
+    annotations: [
+      { x: Math.log10(9789), y: 0.82, xref: 'x', yref: 'y',
+        text: 'mean = 9,789', showarrow: true, arrowhead: 2, arrowcolor: '#f0a500',
+        ax: 30, ay: -20, font: { size: 9.5, color: '#f0a500', family: "'IBM Plex Mono'" },
+        xanchor: 'left' },
+      { x: Math.log10(18269), y: 0.5, xref: 'x', yref: 'y',
+        text: 'max = 18,269', showarrow: true, arrowhead: 2, arrowcolor: '#D94A4A',
+        ax: 25, ay: 20, font: { size: 9.5, color: '#D94A4A', family: "'IBM Plex Mono'" },
+        xanchor: 'left' },
+      { x: 2.5, y: Math.log10(0.25), xref: 'x2', yref: 'y2',
+        text: 'mean = 1.84 steps', showarrow: true, arrowhead: 2, arrowcolor: '#f0a500',
+        ax: 25, ay: -20, font: { size: 9.5, color: '#f0a500', family: "'IBM Plex Mono'" },
+        xanchor: 'left' },
+      { x: 0.235, y: 1.05, xref: 'paper', yref: 'paper',
+        text: 'Dilution CDF — |Adjacent Possible| at Discovery',
+        showarrow: false, font: { size: 11, color: '#dde4f0', family: "'Syne'" },
+        xanchor: 'center' },
+      { x: 0.765, y: 1.05, xref: 'paper', yref: 'paper',
+        text: 'Accessibility — BFS Steps to Become Provable',
+        showarrow: false, font: { size: 11, color: '#dde4f0', family: "'Syne'" },
+        xanchor: 'center' },
+    ],
+    showlegend: false,
+    margin: { l: 70, r: 30, t: 45, b: 60 },
+  });
+
+  Plotly.react('chart-dilution', traces, layout, PLOTLY_CONFIG);
+}
+
+// ═══════════════════════════════════════════════════════════
+// CHART 3: Recall Gain (Panel J)
+// ═══════════════════════════════════════════════════════════
+function renderGain() {
+  const traces = [];
+  const jdata = FIGURE_DATA.j;
+  const recallTypes = [
+    { key: 'gain_matched', symbol: 'square', name: 'matched', dash: 'solid' },
+    { key: 'gain_hub', symbol: 'triangle-up', name: 'hub_global', dash: 'solid' },
+    { key: 'gain_hub_local', symbol: 'triangle-down', name: 'hub_local', dash: 'dot' },
+  ];
+
+  for (const [strat, data] of Object.entries(jdata)) {
+    const color = STRATEGY_COLORS[strat];
+    const stratLabel = STRATEGY_NAMES[strat];
+    for (const rt of recallTypes) {
+      if (!data[rt.key]) continue;
+      traces.push({
+        x: data.K,
+        y: data[rt.key].map(v => v * 100),
+        mode: 'lines+markers',
+        name: `${stratLabel} · ${rt.name}`,
+        legendgroup: strat,
+        line: { color, width: 1.5, dash: rt.dash },
+        marker: { symbol: rt.symbol, size: 6, color, line: { color, width: 1.5 } },
+        hovertemplate: `<b>${stratLabel} · ${rt.name}</b><br>K=%{x:,}<br>Gain=+%{y:.2f} pp<extra></extra>`,
+      });
+    }
+  }
+
+  const layout = applyDarkLayout({
+    xaxis: {
+      type: 'log',
+      title: { text: 'Memory Size K', font: { size: 11, color: '#7a8899' } },
+      tickvals: K_TICKVALS,
+      ticktext: K_TICKTEXT,
+      gridcolor: '#1e2a3a', linecolor: '#253447', tickfont: { size: 10 },
+    },
+    yaxis: {
+      title: { text: 'Coverage Gain vs No Recall (pp)', font: { size: 11, color: '#7a8899' } },
+      ticksuffix: ' pp',
+      gridcolor: '#1e2a3a', linecolor: '#253447', tickfont: { size: 10 },
+      range: [-1, 22],
+    },
+    shapes: [
+      // Zero line
+      { type: 'line', x0: 0, x1: 1, y0: 0, y1: 0,
+        xref: 'paper', yref: 'y', line: { color: '#5a6a7a', dash: 'dash', width: 1 } },
+      // Peak gain zone shading
+      { type: 'rect', x0: 5000, x1: 50000, y0: 0, y1: 22,
+        xref: 'x', yref: 'y', fillcolor: 'rgba(240,165,0,0.04)',
+        line: { width: 0 }, layer: 'below' },
+    ],
+    annotations: [
+      { x: 0, y: 0.6, xref: 'paper', yref: 'y',
+        text: 'no benefit', showarrow: false,
+        font: { size: 9, color: '#5a6a7a', family: "'IBM Plex Mono'" }, xanchor: 'left' },
+      { x: Math.log10(16000), y: 21, xref: 'x', yref: 'y',
+        text: 'peak gain zone 5k–50k', showarrow: false,
+        font: { size: 9, color: '#f0a500', family: "'IBM Plex Mono'" }, xanchor: 'center' },
+    ],
+    legend: {
+      bgcolor: 'rgba(15,22,35,0.85)',
+      bordercolor: '#1e2a3a', borderwidth: 1,
+      font: { size: 9 },
+      x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top',
+    },
+    margin: { l: 80, r: 20, t: 20, b: 60 },
+  });
+
+  Plotly.react('chart-gain', traces, layout, PLOTLY_CONFIG);
+}
+
+// ═══════════════════════════════════════════════════════════
+// CHART 4: Recall Fraction (Panel K)
+// ═══════════════════════════════════════════════════════════
+function renderFrac() {
+  const traces = [];
+  const kdata = FIGURE_DATA.k_frac;
+  const recallTypes = [
+    { key: 'matched', symbol: 'square', dash: 'solid' },
+    { key: 'hub', symbol: 'triangle-up', dash: 'solid' },
+    { key: 'hub_local', symbol: 'triangle-down', dash: 'dot' },
+  ];
+  const recallNames = { matched: 'matched', hub: 'hub_global', hub_local: 'hub_local' };
+
+  for (const [strat, recalls] of Object.entries(kdata)) {
+    const color = STRATEGY_COLORS[strat];
+    const stratLabel = STRATEGY_NAMES[strat];
+    for (const rt of recallTypes) {
+      if (!recalls[rt.key]) continue;
+      const d = recalls[rt.key];
+      traces.push({
+        x: d.K,
+        y: d.frac.map(v => v * 100),
+        mode: 'lines+markers',
+        name: `${stratLabel} · ${recallNames[rt.key]}`,
+        legendgroup: strat,
+        line: { color, width: 1.5, dash: rt.dash },
+        marker: { symbol: rt.symbol, size: 6, color, line: { color, width: 1.5 } },
+        hovertemplate: `<b>${stratLabel} · ${recallNames[rt.key]}</b><br>K=%{x:,}<br>Recall fraction=%{y:.1f}%<extra></extra>`,
+      });
+    }
+  }
+
+  const layout = applyDarkLayout({
+    xaxis: {
+      type: 'log',
+      title: { text: 'Memory Size K', font: { size: 11, color: '#7a8899' } },
+      tickvals: K_TICKVALS,
+      ticktext: K_TICKTEXT,
+      gridcolor: '#1e2a3a', linecolor: '#253447', tickfont: { size: 10 },
+    },
+    yaxis: {
+      title: { text: 'Recall Fraction (%)', font: { size: 11, color: '#7a8899' } },
+      ticksuffix: '%',
+      gridcolor: '#1e2a3a', linecolor: '#253447', tickfont: { size: 10 },
+      range: [-2, 105],
+    },
+    shapes: [
+      { type: 'line', x0: 0, x1: 1, y0: 50, y1: 50,
+        xref: 'paper', yref: 'y', line: { color: '#f0a500', dash: 'dash', width: 1.5 } },
+      // Crossover region shading
+      { type: 'rect', x0: 30000, x1: 50000, y0: 0, y1: 105,
+        xref: 'x', yref: 'y', fillcolor: 'rgba(240,165,0,0.05)',
+        line: { width: 0 }, layer: 'below' },
+    ],
+    annotations: [
+      { x: 0.01, y: 51, xref: 'paper', yref: 'y',
+        text: 'half of steps are recalls', showarrow: false,
+        font: { size: 9, color: '#f0a500', family: "'IBM Plex Mono'" }, xanchor: 'left' },
+      { x: Math.log10(39000), y: 98, xref: 'x', yref: 'y',
+        text: 'recall becomes unnecessary', showarrow: false,
+        font: { size: 9, color: '#f0a500', family: "'IBM Plex Mono'" }, xanchor: 'center' },
+    ],
+    legend: {
+      bgcolor: 'rgba(15,22,35,0.85)',
+      bordercolor: '#1e2a3a', borderwidth: 1,
+      font: { size: 9 },
+      x: 0.99, y: 0.99, xanchor: 'right', yanchor: 'top',
+    },
+    margin: { l: 80, r: 20, t: 20, b: 60 },
+  });
+
+  Plotly.react('chart-frac', traces, layout, PLOTLY_CONFIG);
+}
+
+// ═══════════════════════════════════════════════════════════
+// CHART 5: Cross-Recall Heatmap (Panel L)
+// ═══════════════════════════════════════════════════════════
+function renderHeatmap() {
+  const hd = FIGURE_DATA.heatmap;
+  const z = hd.coverage;
+  const strategies = hd.strategies;
+  const recalls = hd.recall_modes;
+
+  // Build text annotations for cells
+  const texts = z.map(row => row.map(v => `${(v * 100).toFixed(1)}%`));
+
+  // Color scale: pale for baseline, warm amber/red for high
+  const traces = [{
+    type: 'heatmap',
+    z: z,
+    x: recalls,
+    y: strategies,
+    text: texts,
+    texttemplate: '%{text}',
+    textfont: { size: 12, family: "'IBM Plex Mono', monospace", color: '#dde4f0' },
+    colorscale: [
+      [0.0, '#0f1623'],
+      [0.05, '#1a2540'],
+      [0.2, '#1a3a5c'],
+      [0.4, '#8B4513'],
+      [0.7, '#c75000'],
+      [1.0, '#f0a500'],
+    ],
+    zmin: 0.48,
+    zmax: 0.68,
+    showscale: true,
+    colorbar: {
+      tickformat: '.0%',
+      tickfont: { size: 10, color: '#7a8899' },
+      outlinecolor: '#1e2a3a',
+      bgcolor: 'transparent',
+      len: 0.7,
+      y: 0.5,
+      thickness: 12,
+      title: { text: 'Coverage', font: { size: 10, color: '#7a8899' }, side: 'right' },
+    },
+    hovertemplate: '<b>%{y} × %{x}</b><br>Coverage: %{text}<br>vs baseline: +%{customdata:.1f} pp<extra></extra>',
+    customdata: z.map(row => row.map(v => (v - FIGURE_DATA.baseline) * 100)),
+  }];
+
+  const layout = applyDarkLayout({
+    xaxis: {
+      title: { text: 'Recall Strategy', font: { size: 11, color: '#7a8899' } },
+      side: 'bottom',
+      tickfont: { size: 11 },
+      gridcolor: 'transparent',
+      linecolor: '#1e2a3a',
+    },
+    yaxis: {
+      title: { text: 'Exploration Strategy', font: { size: 11, color: '#7a8899' } },
+      tickfont: { size: 11 },
+      gridcolor: 'transparent',
+      linecolor: '#1e2a3a',
+      autorange: 'reversed',
+    },
+    shapes: [
+      // Highlight unblock column left border
+      { type: 'rect',
+        x0: 3.5, x1: 4.5, y0: -0.5, y1: 3.5,
+        xref: 'x', yref: 'y',
+        fillcolor: 'rgba(240,165,0,0.06)',
+        line: { color: '#f0a500', width: 2 } },
+      // Baseline indicator
+      { type: 'line', x0: -0.5, x1: 5.5, y0: -0.5, y1: -0.5,
+        xref: 'x', yref: 'y', line: { color: '#1e2a3a', width: 1 } },
+    ],
+    annotations: [
+      { x: 4, y: -0.75, xref: 'x', yref: 'y',
+        text: '⭐ unblock', showarrow: false,
+        font: { size: 10, color: '#f0a500', family: "'IBM Plex Mono'" }, xanchor: 'center' },
+      { x: 5.7, y: 4.1, xref: 'x', yref: 'y',
+        text: `Baseline: ${(FIGURE_DATA.baseline * 100).toFixed(1)}%`,
+        showarrow: false,
+        font: { size: 10, color: '#7a8899', family: "'IBM Plex Mono'" }, xanchor: 'right' },
+    ],
+    margin: { l: 80, r: 90, t: 30, b: 80 },
+  });
+
+  Plotly.react('chart-heatmap', traces, layout, PLOTLY_CONFIG);
+}
+
+// ═══════════════════════════════════════════════════════════
+// CHART 6: Cost Budget
+// ═══════════════════════════════════════════════════════════
+function renderCostBudget() {
+  const cbd = FIGURE_DATA.cost_budget;
+  const traces = [];
+  const MAX_K = 100000; // K ≥ corpus size (99,412) = full memory, no phase transition
+  const hasCovData = Object.keys(cbd.series).length > 0;
+
+  // Coverage curves (left y-axis) — only if data was generated
+  if (hasCovData) {
+    for (const [key, data] of Object.entries(cbd.series)) {
+      const [strat, rm] = key.split('__');
+      const color = COST_COLORS[strat] || '#888';
+      const name  = COST_NAMES[strat]  || strat;
+      const idxs  = data.K.map((k, i) => i).filter(i => data.K[i] <= MAX_K);
+      const ks    = idxs.map(i => data.K[i]);
+      const covs  = idxs.map(i => data.coverage[i]);
+      const sbuds = idxs.map(i => data.steps_budget[i]);
+      traces.push({
+        x: ks,
+        y: covs,
+        mode: 'lines+markers',
+        name: `${name} · ${rm}`,
+        yaxis: 'y',
+        legendgroup: strat,
+        legendgrouptitle: strat === 'bfs' ? { text: '— Coverage', font: { size: 9, color: '#7a8899' } } : undefined,
+        line: { color, width: 1.5, dash: rm === 'none' ? 'dot' : 'solid' },
+        marker: { symbol: COST_SYMBOLS[rm] || 'diamond', size: 7, color,
+                  line: { color, width: 1.5 } },
+        hovertemplate: `<b>${name} · ${rm}</b><br>K=%{x:,}<br>Coverage=%{y:.1%}<br>Steps=%{customdata:,}<extra></extra>`,
+        customdata: sbuds,
+      });
+    }
+  }
+
+  // Step budget curve (right y-axis) — always shown, deterministic from cost model
+  const budIdx  = cbd.K.map((k, i) => i).filter(i => cbd.K[i] <= MAX_K);
+  traces.push({
+    x: budIdx.map(i => cbd.K[i]),
+    y: budIdx.map(i => cbd.steps_available[i]),
+    mode: 'lines+markers',
+    name: 'Steps available (60M / K)',
+    yaxis: 'y2',
+    legendgroup: 'budget',
+    legendgrouptitle: { text: '— Cost Model', font: { size: 9, color: '#7a8899' } },
+    line: { color: '#f0a500', width: 2, dash: 'dot' },
+    marker: { symbol: 'diamond', size: 6, color: '#f0a500' },
+    hovertemplate: 'K=%{x:,}<br>Steps=%{y:,.0f}<extra>Budget = 60M / K</extra>',
+  });
+
+  // Annotations for key K values
+  const annotations = [
+    { x: Math.log10(1000), y: 1, xref: 'x', yref: 'paper',
+      text: 'K=1k<br>calibration', showarrow: true, arrowhead: 2,
+      ax: 30, ay: -30, font: { size: 9, color: '#f0a500', family: "'IBM Plex Mono'" },
+      arrowcolor: '#f0a500', xanchor: 'left' },
+    { x: Math.log10(40), y: 0.97, xref: 'x', yref: 'paper',
+      text: '← memory bottleneck', showarrow: false,
+      font: { size: 9, color: '#5a6a7a', family: "'IBM Plex Mono'" }, xanchor: 'left' },
+    { x: Math.log10(200000), y: 0.97, xref: 'x', yref: 'paper',
+      text: 'step bottleneck →', showarrow: false,
+      font: { size: 9, color: '#5a6a7a', family: "'IBM Plex Mono'" }, xanchor: 'right' },
+  ];
+
+  if (!hasCovData) {
+    annotations.push({
+      x: 0.5, y: 0.5, xref: 'paper', yref: 'paper',
+      text: 'Run experiment2_cost_budget.py to populate coverage curves',
+      showarrow: false,
+      font: { size: 13, color: '#5a6a7a', family: "'IBM Plex Mono'" },
+      xanchor: 'center',
+    });
+  }
+
+  const layout = applyDarkLayout({
+    xaxis: {
+      type: 'log',
+      title: { text: 'Memory Size K', font: { size: 11, color: '#7a8899' } },
+      tickvals: K_TICKVALS,
+      ticktext: K_TICKTEXT,
+      gridcolor: '#1e2a3a', linecolor: '#253447', tickfont: { size: 10 },
+      range: [Math.log10(40), Math.log10(130000)],
+    },
+    yaxis: {
+      title: { text: 'Coverage Fraction', font: { size: 11, color: '#7a8899' } },
+      tickformat: '.0%',
+      gridcolor: '#1e2a3a', linecolor: '#253447', tickfont: { size: 10 },
+      range: [0.44, 1.02],
+      side: 'left',
+    },
+    yaxis2: {
+      title: { text: 'Steps Available (60M / K)', font: { size: 11, color: '#f0a500' } },
+      type: 'log',
+      gridcolor: 'transparent',
+      tickfont: { size: 10, color: '#f0a500' },
+      range: [Math.log10(500), Math.log10(2000000)],
+      side: 'right',
+      overlaying: 'y',
+      showgrid: false,
+      tickformat: ',d',
+    },
+    shapes: [
+      // Calibration line at K=1000
+      { type: 'line', x0: 1000, x1: 1000, y0: 0, y1: 1,
+        xref: 'x', yref: 'paper', layer: 'below',
+        line: { color: '#f0a500', width: 1.5, dash: 'dot' } },
+      // 60k step reference on right axis
+      { type: 'line', x0: 0, x1: 1, y0: Math.log10(60000), y1: Math.log10(60000),
+        xref: 'paper', yref: 'y2', layer: 'below',
+        line: { color: '#f0a50060', width: 1, dash: 'dash' } },
+      // Shading: memory-limited zone (K < 1000)
+      { type: 'rect', x0: 40, x1: 1000, y0: 0, y1: 1,
+        xref: 'x', yref: 'paper', layer: 'below',
+        fillcolor: 'rgba(74,144,217,0.04)', line: { width: 0 } },
+      // Shading: step-limited zone (K > 1000)
+      { type: 'rect', x0: 1000, x1: 1200000, y0: 0, y1: 1,
+        xref: 'x', yref: 'paper', layer: 'below',
+        fillcolor: 'rgba(217,74,74,0.04)', line: { width: 0 } },
+      // Baseline
+      { type: 'line', x0: 0, x1: 1, y0: FIGURE_DATA.baseline, y1: FIGURE_DATA.baseline,
+        xref: 'paper', yref: 'y', layer: 'below',
+        line: { color: '#5a6a7a', width: 1, dash: 'dash' } },
+    ],
+    annotations,
+    legend: {
+      bgcolor: 'rgba(15,22,35,0.85)',
+      bordercolor: '#1e2a3a', borderwidth: 1,
+      font: { size: 9 },
+      x: 0.01, y: 0.99, xanchor: 'left', yanchor: 'top',
+      groupclick: 'toggleitem',
+    },
+    margin: { l: 70, r: 80, t: 20, b: 60 },
+  });
+
+  Plotly.react('chart-cost', traces, layout, PLOTLY_CONFIG);
+}
+
+// ═══════════════════════════════════════════════════════════
+// MODAL
+// ═══════════════════════════════════════════════════════════
+const MODAL_CONTENT = [
+  `<h3>Phase Transition — Extended Methodology</h3>
+   <p><strong>Experimental setup:</strong> Each data point represents a single independent simulation run. The agent begins with a fixed set of "root theorems" (48,081 provable with no prerequisites). At each step, it selects one theorem from its memory, marks it proved, and adds all newly-provable theorems to the frontier. If memory is full, theorems are evicted according to the strategy.</p>
+   <p><strong>Memory model:</strong> Memory K is implemented as a bounded buffer. When |memory| = K and a new theorem must be added, the oldest/newest/random/least-useful theorem is evicted (depending on recall mode). Recall = loading an evicted theorem back into memory (costs 1 step).</p>
+   <p><strong>Why 60k steps:</strong> This is the "interesting" budget — large enough to reveal strategy differences, small enough that K-constraints remain binding for most of the K range. At K=∞ (unlimited memory), 60k steps achieves ~97.9% coverage regardless of strategy.</p>
+   <p><strong>Phase transition interpretation:</strong> The S-shaped coverage curve as a function of log(K) is formally analogous to thermodynamic phase transitions. Below the critical K (~1,000), the system is in a "jammed" phase. Above K~30k, it's in a "free" phase. The transition width and critical point are robust across strategies.</p>
+   <h3>Baseline and Ceiling</h3>
+   <p><strong>Baseline (48.4%):</strong> This is the fraction of theorems provable without any memory (just the roots). It equals the ratio of root theorems to total theorems: 48,081 / 99,412 ≈ 0.484. Any strategy starting at K→0 converges to this value.</p>
+   <p><strong>Ceiling (97.9%):</strong> Not 100% because some theorems form dependency cycles (removed via Feedback Vertex Set). ~2.1% of theorems require theorems that haven't been proved in our simplified model.</p>`,
+
+  `<h3>Dilution — Extended Methodology</h3>
+   <p><strong>How dilution is computed:</strong> For each theorem T, we simulate a BFS exploration from all roots simultaneously. At the moment T first becomes provable (all prerequisites proven), we record the size of the current "adjacent possible" — all theorems whose prerequisites are now satisfied. This size is T's dilution.</p>
+   <p><strong>Why BFS for this measurement:</strong> BFS gives the earliest possible moment each theorem becomes provable, minimizing dilution. Any other exploration strategy would observe higher dilution (theorems unlocked in a more specific order). BFS dilution is therefore a lower bound on realistic dilution.</p>
+   <p><strong>Interpretation of mean=9,789:</strong> In a corpus of 99,412 theorems, a randomly-discovered theorem at its first possible moment of discovery competes with ~9,789 other options. This represents a "signal-to-noise" ratio of 1/9789 ≈ 0.01% — far lower than human expert selection.</p>
+   <h3>Accessibility Distribution</h3>
+   <p><strong>BFS depth:</strong> Accessibility = the BFS layer in which T first becomes reachable from roots. Depth 0 = root theorems (no prerequisites). Depth 1 = theorems whose only prerequisites are roots. Depth 2 = theorems needing depth-1 theorems, etc.</p>
+   <p><strong>Exponential decay:</strong> The accessibility distribution is approximately geometric with mean 1.84, reflecting a scale-free dependency structure. Most of Mathlib's "heavy lifting" is done in layers 0 and 1.</p>`,
+
+  `<h3>Recall Gain — Extended Methodology</h3>
+   <p><strong>How gain is computed:</strong> For each (strategy, K) pair, we run the strategy both with and without recall. Gain = coverage(with recall) − coverage(no recall). By definition, gain is computed at the same K, strategy, and compute budget. It isolates the marginal contribution of memory management.</p>
+   <p><strong>Why gains peak and then return to zero:</strong> At small K, recall is constant (agent thrashes). At large K, recall is never triggered (frontier is always non-empty). Peak gain occurs at the K where memory constraint is occasionally binding — tight enough that eviction happens, large enough that recovered theorems are still useful.</p>
+   <p><strong>Greedy+matched = "unblock" strategy:</strong> The matched recall for Greedy is defined as: recall the theorem that would most rapidly unblock new frontier theorems. This is a locally-optimal one-step planner. It's the closest thing to optimal single-step recall possible without oracle knowledge of the full graph.</p>
+   <h3>Oracle vs Local Hub Recall</h3>
+   <p><strong>hub_global:</strong> Recalls the evicted theorem with the highest out-degree in the full ground-truth theorem graph (oracle knowledge). This is an upper bound on structure-based recall strategies.</p>
+   <p><strong>hub_local:</strong> Recalls the evicted theorem with the highest out-degree in the agent's <em>observed</em> subgraph — only theorems the agent has already encountered. This is noisier because the agent's exploration is incomplete. The gap between hub_global and hub_local quantifies the value of global library knowledge.</p>`,
+
+  `<h3>Recall Fraction — Extended Methodology</h3>
+   <p><strong>Computation:</strong> At budget=60k steps, recall fraction = (number of recall steps) / 60,000. A "recall step" is any step where the agent reloads a previously-evicted theorem rather than discovering a new one. Discovery steps are steps where a theorem is proven for the first time.</p>
+   <p><strong>DFS+matched drops early:</strong> For DFS, "matched" recall = LIFO (last-in-first-out = most-recently evicted). DFS explores deep chains, so the most recently evicted theorem was pushed out because DFS moved on to its child. Re-loading it immediately is often unproductive. DFS's intrinsic exploration pattern makes LIFO recall nearly useless, so the recall strategy is rarely invoked (near-zero recall fraction). This is not because DFS has a better memory — it's because it wastes fewer steps on unproductive recalls.</p>
+   <p><strong>Greedy has intermediate recall fraction:</strong> Greedy uses unblock as its matched recall, which is productive when invoked. So it balances exploration and recall. The high recall fraction at small K reflects memory pressure; as K grows, unblock invocations become rarer.</p>
+   <h3>The Working Memory Threshold</h3>
+   <p>The crossover at K≈30,000–50,000 (where recall fraction drops from ~50% to near zero) represents the "working memory threshold" — the minimum memory needed to hold the active frontier of the Mathlib theorem graph without thrashing. Below this threshold, the system is memory-bound. Above it, compute-bound. This threshold likely reflects the maximum "active frontier width" of the theorem dependency DAG.</p>`,
+
+  `<h3>Cross-Recall Heatmap — Extended Methodology</h3>
+   <p><strong>Experimental design:</strong> Previous experiments used "matched" recall — each exploration strategy had a pre-assigned recall mode (BFS=FIFO, DFS=LIFO, Random=random, Greedy=unblock). This cross-recall experiment decouples the two choices by running all 4×6=24 combinations independently at K=10,000, budget=60k.</p>
+   <p><strong>Why K=10,000:</strong> This is in the "interesting regime" — mid-memory, where recall strategy differences are maximally visible. At K=50k or above, all recall strategies converge (memory is rarely binding). At K=500 or below, all strategies collapse (thrashing regardless of recall policy).</p>
+   <p><strong>The unblock column:</strong> The defining result: unblock recall achieves ~64.5% coverage regardless of which exploration strategy uses it. BFS+unblock ≈ DFS+unblock ≈ Random+unblock ≈ Greedy+unblock. This symmetry is statistically robust and implies that the recall mechanism, not the exploration mechanism, is the bottleneck at this memory regime.</p>
+   <h3>Implications for Neural Automated Theorem Provers</h3>
+   <p><strong>For premise selection:</strong> Neural ATPs spend most of their computation on premise selection (which theorems to include in the proof context). This is structurally equivalent to our "recall" mechanism. Our finding suggests that the quality of premise selection policy dominates over the quality of proof search strategy, at realistic context window sizes (the K constraint).</p>
+   <p><strong>Practical recommendation:</strong> Invest R&D resources in retrieval architecture (embedding models, re-rankers, coverage-aware selection) over search algorithms (MCTS variants, beam search width). The retrieval-search decoupling result is likely robust to the specific theorem corpus.</p>
+   <p><strong>The LIFO finding:</strong> Large language models with sliding-window attention (LIFO-like context management) may be suboptimal for theorem proving. Our result suggests that LLMs should use retrieval-augmented generation (unblock-like recall) rather than recency-biased attention windows.</p>`,
+
+  `<h3>Cost Budget — Extended Methodology</h3>
+   <p><strong>Cost model rationale:</strong> The earlier experiments assume discovery is free once prerequisites are in memory. But Lean 4's kernel must type-check each tactic application. With K premises in memory and a tactic expecting n premises, there are C(K, n) combinations to test. For the dominant case of unary tactics (apply, rw, exact), this is linear in K — hence <code>cost_per_step = max(1, K)</code>.</p>
+   <p><strong>TIME_BUDGET = 60M compilation-equivalents:</strong> Calibrated so that K=1,000 gives exactly 60,000 steps (matching the existing experiments). This ensures the calibration point is directly comparable.</p>
+   <p><strong>Why this predicts a non-monotonic curve:</strong> Below K=1k, memory is the bottleneck — adding memory unlocks more theorems. Above K=1k, each step becomes proportionally more expensive — fewer proof attempts can be made in the budget. Coverage should peak at the K that balances these two forces.</p>
+   <h3>New Strategies</h3>
+   <p><strong>min_cost:</strong> At each step, samples 50 candidates from the adjacent possible and picks the theorem with the fewest total prerequisites. Fewer prerequisites ≈ simpler proof ≈ cheaper to verify. This strategy optimises for proof tractability rather than coverage breadth.</p>
+   <p><strong>efficient:</strong> Computes <code>expansion_unlocked / max(1, total_prereqs)</code> for each candidate and picks the maximum. This maximises coverage gain per unit of proof complexity — the "coverage ROI" strategy. Expected to outperform greedy at large K where step budget is tight.</p>
+   <h3>Connection to Neural Provers</h3>
+   <p>Neural provers implicitly handle the combinatorial search problem via next-step prediction — the network's forward pass replaces enumeration of premise combinations. Our cost model approximates this: the retrieval component selects K candidate premises, the generation component selects one tactic + one subset. Quality of retrieval (context window selection = our K) directly sets the cost envelope.</p>
+   <p>The predicted optimal K in this model corresponds directly to the optimal <strong>context window size</strong> for a retrieval-augmented prover. Too small a context = missing prerequisites. Too large = overwhelming the generator with noise at high per-step cost.</p>`,
+];
+
+function openModal() {
+  const overlay = document.getElementById('modal-overlay');
+  document.getElementById('modal-content').innerHTML = MODAL_CONTENT[activeTab];
+  document.getElementById('modal-title').textContent = [
+    'Phase Transition — Methodology Notes',
+    'Dilution — Methodology Notes',
+    'Recall Gain — Methodology Notes',
+    'Recall Fraction — Methodology Notes',
+    'Cross-Recall Heatmap — Methodology Notes',
+    'Cost Budget — Methodology Notes',
+  ][activeTab];
+  overlay.classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+function closeModalOnBg(e) {
+  if (e.target === document.getElementById('modal-overlay')) closeModal();
+}
+
+function updateModal() {
+  // Update modal title if open
+  const overlay = document.getElementById('modal-overlay');
+  if (overlay.classList.contains('open')) openModal();
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeModal();
+});
+
+// ═══════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+  // Stagger rendering
+  setTimeout(() => { renderEFG(); chartsRendered.add(0); }, 80);
+});
+
+// Handle resize
+window.addEventListener('resize', () => {
+  chartsRendered.forEach(idx => {
+    const chartId = ['chart-efg','chart-dilution','chart-gain','chart-frac','chart-heatmap','chart-cost'][idx];
+    if (chartId) Plotly.Plots.resize(document.getElementById(chartId));
+  });
+});
+</script>
+</body>
+</html>

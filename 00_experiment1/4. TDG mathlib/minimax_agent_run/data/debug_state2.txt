@@ -1,0 +1,49 @@
+=== TACTIC 1 ===
+raw: choose g hg₁ hg₂ using fun x : { x : A | IsAlgebraic R x } => x.coe_prop
+
+=== STATE BEFORE ===
+R : Type u
+A : Type v
+inst✝⁴ : CommRing R
+inst✝³ : CommRing A
+inst✝² : IsDomain A
+inst✝¹ : Algebra R A
+inst✝ : NoZeroSMulDivisors R A
+⊢ #(ULift.{u, v} { x // IsAlgebraic R x }) ≤ #(ULift.{v, u} R[X]) * ℵ₀
+
+=== STATE AFTER ===
+R : Type u
+A : Type v
+inst✝⁴ : CommRing R
+inst✝³ : CommRing A
+inst✝² : IsDomain A
+inst✝¹ : Algebra R A
+inst✝ : NoZeroSMulDivisors R A
+g : ↑{x | IsAlgebraic R x} → R[X]
+hg₁ : ∀ (x : ↑{x | IsAlgebraic R x}), g x ≠ 0
+hg₂ : ∀ (x : ↑{x | IsAlgebraic R x}), (aeval ↑x) (g x) = 0
+⊢ #(ULift.{u, v} { x // IsAlgebraic R x }) ≤ #(ULift.{v, u} R[X]) * ℵ₀
+
+=== CONTEXT ===
+{
+  "variables": {
+    "R": {
+      "type": "Type u",
+      "is_hypothesis": false
+    },
+    "A": {
+      "type": "Type v",
+      "is_hypothesis": false
+    }
+  },
+  "hypotheses": {},
+  "typeclasses": [
+    "CommRing R",
+    "CommRing A",
+    "IsDomain A",
+    "Algebra R A",
+    "NoZeroSMulDivisors R A"
+  ],
+  "goal": "#(ULift.{u, v} { x // IsAlgebraic R x }) \u2264 #(ULift.{v, u} R[X]) * \u2135\u2080",
+  "goal_type": ""
+}

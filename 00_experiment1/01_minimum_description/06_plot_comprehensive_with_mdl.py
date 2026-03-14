@@ -19,7 +19,7 @@ import math
 SCRIPT_DIR = Path(__file__).resolve().parent
 DATA_FILE = SCRIPT_DIR / "jsons" / "traced_theorems_unified_v2.jsonl"
 FIGS_DIR = SCRIPT_DIR / "figs"
-MDL_RESULTS = SCRIPT_DIR / "mdl_gain_results.csv"
+MDL_RESULTS = SCRIPT_DIR / "data" / "mdl_gain_results.csv"
 
 print("Loading data...")
 # Load MDL results

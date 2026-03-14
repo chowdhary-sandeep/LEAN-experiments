@@ -380,8 +380,10 @@ for idx, row in bottom_20.iterrows():
     print(f"{short_name:50s} | MDL: {row['mdl_gain']:>10.0f} | Uses: {row['num_uses']:>5} | Cost: {row['cost']:>6.0f}")
 
 # Save results
-df.to_csv(SCRIPT_DIR / "mdl_gain_results.csv", index=False)
-print(f"\nSaved full results to: mdl_gain_results.csv")
+data_dir = SCRIPT_DIR / "data"
+data_dir.mkdir(exist_ok=True)
+df.to_csv(data_dir / "mdl_gain_results.csv", index=False)
+print(f"\nSaved full results to: data/mdl_gain_results.csv")
 
 print("\n" + "="*70)
 print("MDL GAIN ANALYSIS COMPLETE")

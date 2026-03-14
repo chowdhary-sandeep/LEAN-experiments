@@ -22,13 +22,12 @@ except ImportError:
 
 # Configuration
 _SCRIPT_DIR = Path(__file__).resolve().parent
-CACHE_DIR = _SCRIPT_DIR / "cache"
 FIGS_DIR = _SCRIPT_DIR / "figs"
 FIGS_DIR.mkdir(exist_ok=True)
 
-# Cache prefix for FVS pipeline files
+# Results are produced by 03_future_prediction pipeline
 FVS_CACHE_PREFIX = "fvs_pipeline_v2_"
-RESULTS_JSON = CACHE_DIR / f"{FVS_CACHE_PREFIX}results.json"
+RESULTS_JSON = _SCRIPT_DIR.parent / "03_future_prediction" / "data" / f"{FVS_CACHE_PREFIX}results.json"
 
 
 def load_results() -> List[Dict]:

@@ -1,0 +1,43 @@
+=== STATE BEFORE ===
+R : Type u
+A : Type v
+inst✝⁴ : CommRing R
+inst✝³ : CommRing A
+inst✝² : IsDomain A
+inst✝¹ : Algebra R A
+inst✝ : NoZeroSMulDivisors R A
+⊢ lift.{u, v} #{ x // IsAlgebraic R x } ≤ lift.{v, u} #R[X] * ℵ₀
+
+=== STATE AFTER ===
+R : Type u
+A : Type v
+inst✝⁴ : CommRing R
+inst✝³ : CommRing A
+inst✝² : IsDomain A
+inst✝¹ : Algebra R A
+inst✝ : NoZeroSMulDivisors R A
+⊢ #(ULift.{u, v} { x // IsAlgebraic R x }) ≤ #(ULift.{v, u} R[X]) * ℵ₀
+
+=== CONTEXT ===
+{
+  "variables": {
+    "R": {
+      "type": "Type u",
+      "is_hypothesis": false
+    },
+    "A": {
+      "type": "Type v",
+      "is_hypothesis": false
+    }
+  },
+  "hypotheses": {},
+  "typeclasses": [
+    "CommRing R",
+    "CommRing A",
+    "IsDomain A",
+    "Algebra R A",
+    "NoZeroSMulDivisors R A"
+  ],
+  "goal": "lift.{u, v} #{ x // IsAlgebraic R x } \u2264 lift.{v, u} #R[X] * \u2135\u2080",
+  "goal_type": "lift"
+}

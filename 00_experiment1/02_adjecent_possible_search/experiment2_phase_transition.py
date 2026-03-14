@@ -3,9 +3,10 @@ Phase Transition Analysis with Recall Mechanisms
 
 Strategies: BFS (FIFO), DFS (LIFO), Random, Greedy
 Recall modes:
-  - none:    Agent stops when A_t empties
-  - matched: Strategy-specific recall (BFS=oldest, DFS=newest, Random=random, Greedy=max-unblock)
-  - hub:     Universal structural recall (highest out-degree not in memory)
+  - none:      Agent stops when A_t empties
+  - matched:   Strategy-specific recall (BFS=oldest, DFS=newest, Random=random, Greedy=max-unblock)
+  - hub:       Universal structural recall (highest global out-degree not in memory) [oracle]
+  - hub_local: Same but using local out-degree over discovered+adjacent subgraph [realistic]
 
 OPTIMIZED v2: Freed graph after caching, IndexedSet for O(1) recall sampling,
               flipped init loop (iterate mem_set successors not all theorems).
@@ -21,8 +22,8 @@ from pathlib import Path
 from collections import deque
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-CACHE_BUNDLE = SCRIPT_DIR / "cache" / "bundle.pkl"
-OUTPUT_JSON = SCRIPT_DIR / "experiment2_phase_transition_results.json"
+CACHE_BUNDLE = SCRIPT_DIR.parent / "cache" / "bundle.pkl"
+OUTPUT_JSON = SCRIPT_DIR / "data" / "experiment2_phase_transition_results.json"
 
 print("=" * 80)
 print("PHASE TRANSITION: Coverage vs Memory x Strategy x Recall Mode")
@@ -168,9 +169,13 @@ class MemoryDiscovery:
 MAX_CONSECUTIVE_RECALLS = 200
 
 
-def make_recall_priority(strategy, recall_mode, discovery_order):
+def make_recall_priority(strategy, recall_mode, discovery_order, md):
     if recall_mode == 'hub':
         return lambda thm: -out_degree.get(thm, 0)
+    if recall_mode == 'hub_local':
+        # local out-degree: successors already discovered or in adjacent possible
+        return lambda thm: -sum(1 for s in succ_cache[thm]
+                                if s in md.discovered or s in md.adjacent)
     if strategy == 'bfs':
         return lambda thm: discovery_order.get(thm, float('inf'))
     elif strategy == 'dfs':
@@ -198,7 +203,7 @@ def run(strategy, recall_mode, mem_size, max_budget, checkpoints, seed=42):
     recall_heap = []
     recall_counter = 0
     use_recall_heap = recall_mode != 'none' and strategy != 'greedy'
-    pri_fn = make_recall_priority(strategy, recall_mode, discovery_order) if recall_mode != 'none' else None
+    pri_fn = make_recall_priority(strategy, recall_mode, discovery_order, md) if recall_mode != 'none' else None
 
     if use_recall_heap and md.recallable:
         for thm in md.recallable:
@@ -229,6 +234,10 @@ def run(strategy, recall_mode, mem_size, max_budget, checkpoints, seed=42):
         sample = md.recallable.sample(30)  # O(k) via IndexedSet
         if recall_mode == 'hub':
             return max(sample, key=lambda c: out_degree.get(c, 0))
+        if recall_mode == 'hub_local':
+            # local out-degree: count successors already visible to the agent
+            return max(sample, key=lambda c: sum(
+                1 for s in succ_cache[c] if s in md.discovered or s in md.adjacent))
         best, best_g = None, -1
         for c in sample:
             g = sum(1 for s in succ_cache[c]
@@ -334,10 +343,12 @@ def run(strategy, recall_mode, mem_size, max_budget, checkpoints, seed=42):
 
 # -- Configuration --------------------------------------------------------------
 
+# Capped at 100,000 — corpus has 99,412 theorems, so K ≥ 100k = full memory (no constraint).
+# Values beyond this are identical to K=100k and add no information.
 MEMORY_SIZES = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 30000,
-                40000, 50000, 75000, 100000, 200000, 500000, 999999]
+                40000, 50000, 75000, 100000]
 STRATEGIES = ['bfs', 'dfs', 'random', 'greedy']
-RECALL_MODES = ['none', 'matched', 'hub']
+RECALL_MODES = ['none', 'matched', 'hub', 'hub_local']
 BUDGETS = [1000, 5000, 20000, 60000]
 CHECKPOINTS = set(BUDGETS)
 MAX_BUDGET = max(BUDGETS)
@@ -355,7 +366,7 @@ for strat in STRATEGIES:
         data = []
 
         for K in MEMORY_SIZES:
-            K_label = 'inf' if K == 999999 else str(K)
+            K_label = str(K)
             t0 = time.time()
             res = run(strat, rm, K, MAX_BUDGET, CHECKPOINTS)
             dt = time.time() - t0

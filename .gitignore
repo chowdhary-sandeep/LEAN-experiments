@@ -58,3 +58,10 @@ __pycache__/
 *.json
 *.jsonl
 
+# Parquet files (large data files)
+*.parquet
+
+# Pickle files (large data files)
+*.pkl
+*.pickle
+

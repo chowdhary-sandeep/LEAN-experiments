@@ -25,8 +25,8 @@ from tqdm import tqdm
 # Configuration
 SCRIPT_DIR = Path(__file__).resolve().parent
 DATA_FILE = SCRIPT_DIR / "jsons" / "traced_theorems_unified_v2.jsonl"
-CACHE_BUNDLE = SCRIPT_DIR / "cache" / "bundle.pkl"
-OUTPUT_JSON = SCRIPT_DIR / "experiment2_search_proof_results.json"
+CACHE_BUNDLE = SCRIPT_DIR.parent / "cache" / "bundle.pkl"
+OUTPUT_JSON = SCRIPT_DIR / "data" / "experiment2_search_proof_results.json"
 
 print("="*80)
 print("SEARCH PROOF DYNAMICS: Adjacent Possible Analysis")

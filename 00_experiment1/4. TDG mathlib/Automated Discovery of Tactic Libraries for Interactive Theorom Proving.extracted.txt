@@ -1,0 +1,2177 @@
+
+===== PAGE 1 =====
+Automated Discovery of Tactic Libraries for Interactive
+Theorem Proving
+YUTONG XIN, University of Texas at Austin, USA
+JIMMY XIN, University of Texas at Austin, USA
+GABRIEL POESIA, Stanford University, USA
+NOAH GOODMAN, Stanford University, USA
+QIAOCHU CHEN, New York University, USA
+ISIL DILLIG, University of Texas at Austin, USA
+Enabling more concise and modular proofs is essential for advancing formal reasoning using interactive
+theorem provers (ITPs). Since many ITPs, such as Rocq and Lean, use tactic-style proofs, learning higher-level
+custom tactics is crucial for proof modularity and automation. This paper presents a novel approach to
+tactic discovery, which leverages Tactic Dependence Graphs (TDGs) to identify reusable proof strategies
+across multiple proofs. TDGs capture logical dependencies between tactic applications while abstracting away
+irrelevant syntactic details, allowing for both the discovery of new tactics and the refactoring of existing
+proofs into more modular forms. We have implemented this technique in a tool calledTacMiner and compare
+it against an anti-unification-based approach (Peano) to tactic discovery. Our evaluation demonstrates that
+TacMiner can learn 3× as many tactics as Peano and reduces the size of proofs by 26% across all benchmarks.
+Furthermore, our evaluation demonstrates the benefits of learning custom tactics for proof automation,
+allowing a state-of-the-art proof automation tool to achieve a relative increase of 172% in terms of success rate.
+CCS Concepts: •Hardware → Theorem proving and SAT solving ; •Theory of computation → Ab-
+straction; •Software and its engineering → Automatic programming.
+Additional Key Words and Phrases: Interactive Theorem Proving, Machine Learning
+ACM Reference Format:
+Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig. 2025. Automated
+Discovery of Tactic Libraries for Interactive Theorem Proving. Proc. ACM Program. Lang. 9, OOPSLA2,
+Article 343 (October 2025), 36 pages. https://doi.org/10.1145/3763121
+1 Introduction
+Tactics are essential in interactive theorem proving, particularly for facilitating reuse and modularity
+in proof development. By encapsulating common proof strategies into reusable components, tactics
+allow users to apply previously developed solutions to new problems, reducing the effort required
+to construct proofs from scratch. Tactics also facilitate proof automation, as shorter proofs are
+typically easier to discover using automated techniques.
+While interactive theorem provers (ITPs) such as Rocq (formerly known as Coq) and Lean
+provide a rich library of built-in tactics, proof engineers typically need to devise custom tactics
+Authors’ Contact Information: Yutong Xin, maxryeery@utexas.edu, University of Texas at Austin, Austin, Texas, USA; Jimmy
+Xin, jxin31415@utexas.edu, University of Texas at Austin, Austin, Texas, USA; Gabriel Poesia, poesia@stanford.edu, Stanford
+University, Stanford, California, USA; Noah Goodman, ngoodman@stanford.edu, Stanford University, Stanford, California,
+USA; Qiaochu Chen, qc1127@cs.nyu.edu, New York University, New York, New York, USA; Isil Dillig, isil@cs.utexas.edu,
+University of Texas at Austin, Austin, Texas, USA.
+Please use nonacm option or ACM Engage class to enable CC licenses
+This work is licensed under a Creative Commons Attribution 4.0 International License.
+© 2025 Copyright held by the owner/author(s).
+ACM 2475-1421/2025/10-ART343
+https://doi.org/10.1145/3763121
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+arXiv:2503.24036v2  [cs.PL]  22 Aug 2025
+
+===== PAGE 2 =====
+343:2 Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig
+Fig. 1. Syntactically different proofs w/ same TDG in Figure 2,
+for Lemma (𝑃 ∧𝑄) → ( 𝑃 → 𝑅) → ( 𝑄 = 𝑇 ) → ( 𝑅 ∧𝑇 → 𝑊 ) → 𝑊 .
+𝚎𝚡𝚊𝚌𝚝 (H,𝚑𝟶)
+(g′ ,g) (g′ ,g) (g′ ,g)
+(h,h) (h,h)(h,h1)
+(h1,h2) (h2,p) (h,h)
+(g′ ,g)
+(h3,h)
+(g1,g) (g2,g)
+(p′ ,h)
+(g′ ,g)
+𝚍𝚎𝚜𝚝𝚛𝚞𝚌𝚝
+𝚒𝚗𝚝𝚛𝚘 𝚒𝚗𝚝𝚛𝚘 𝚒𝚗𝚝𝚛𝚘 𝚒𝚗𝚝𝚛𝚘
+𝚊𝚙𝚙𝚕𝚢
+𝚊𝚙𝚙𝚕𝚢
+𝚛𝚎𝚠𝚛𝚒𝚝𝚎
+𝚎𝚡𝚊𝚌𝚝
+𝚜𝚙𝚕𝚒𝚝
+Fig. 2. TDG for Figure 1.
+by composing existing tactics into higher-level domain-specific building blocks [14]. For example,
+the mathlib library in Lean contains useful tactics for mathematical proofs, and the flocq library
+in Rocq provides tactics that facilitate proofs about floating point computation. But even if proof
+assistants enable users to write their own tactics, learning to do so adds an extra layer on top of
+the already steep learning curve of ITPs.
+In this paper, we address the problem of automatically learning custom tactics (i.e., compositions
+of existing tactics) from a given proof corpus. Learning such tactic libraries can uncover reusable
+patterns in proofs, making it easier to construct similar proofs within the same domain. Furthermore,
+tactic discovery can enhance proof automation by facilitating a form of curriculum learning [32],
+where more complex proofs are synthesized using custom tactics discovered in simpler proofs.
+While there has been prior work [8, 10, 18] on learning software libraries from a given corpus
+of programs, these methods do not readily apply to tactic-based proofs. Such proofs are written
+in an imperative style, with frequent reference to implicit, mutating objects such as the current
+goal, which is typically not present in the source, but rather visualized interactively. However,
+existing work on library learning typically assumes functional programs and focuses on generalizing
+concrete program expressions into lambda abstractions. In contrast, tactic discovery requires an
+understanding of the logical relationships between different proof steps and the ability to construct
+higher-level tactics that capture these relationships.
+In this paper, we address this problem by proposing a new proof abstraction called tactic de-
+pendence graph (TDG) that hides irrelevant syntactic variations between different proofs, while
+focusing on important logical dependencies. In a TDG, nodes represent tactic applications, while
+edges represent proof state dependencies between them. For example, Figure 1 shows two syntacti-
+cally different proofs of the same theorem, which have exactly the same TDG abstraction shown
+in Figure 2. In essence, the TDG abstraction hides minor syntactic variations in the proof, such
+as how sub-goals are named or in what order tactics are applied, and instead focuses on semantic
+dependencies in between different tactic applications.
+Given a corpus of proofs from the same domain, our approach leverages the TDG abstraction
+to discover tactics that maximize compression of the proof corpus—a metric widely used in prior
+work on library learning [8, 10, 18, 41]. Intuitively, the greater the compression rate of existing
+proofs, the more broadly applicable the resulting tactics. To achieve this goal, our method identifies
+isomorphic subgraphs within the TDGs that exhibit a special property called collapsibility. This
+property guarantees that (1) each common subgraph can be translated into a valid tactic and (2)
+the resulting tactics can be applied to refactor the original proofs while preserving their validity.
+Our tactic discovery algorithm is inspired by ideas from top-down enumerative program syn-
+thesis [8, 21, 23, 38]; however, it needs to address additional challenges that are not present in
+the program synthesis setting. First, since our goal is to discover common isomorphic subgraphs
+of existing TDGs, we need to perform enumerative search over graphs as opposed to abstract
+syntax trees. Second, unlike program synthesis, there is no pre-determined grammar for tactic
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 3 =====
+Automated Discovery of Tactic Libraries for Interactive Theorem Proving 343:3
+dependence graphs. Finally, since our goal is to maximize an optimization objective, the synthesizer
+cannot stop as soon as it finds an isomorphic embedding but must keep going until it identifies
+the highest-scoring tactic. Our proposed tactic discovery algorithm effectively addresses these
+challenges using two key ideas. First, it extracts a graph grammar from the TDGs of existing proofs.
+Second, it substantially prunes the search space by deriving upper bounds on the compression
+power of candidate tactics.
+We have implemented our proposed tactic discovery method in a tool called TacMiner and
+evaluate it on several Rocq projects, including CompCert [35] and proofs involving program logics.
+We compare our approach against an anti-unification baseline from prior work (Peano) [41] and
+show that TacMiner can learn 3× as many tactics compared to Peano. Furthermore, the tactics
+learned by TacMiner make proofs 26% shorter across all benchmarks, reducing the corpus size to
+63% of its original size in some cases. Finally, our evaluation also demonstrates the benefits of our
+approach for proof automation, allowing a state-of-the-art tool (Copra) [50] to achieve a relative
+increase of 172% in the number of theorems proved.
+To summarize, this paper makes the following contributions:
+• We introduce tactic dependence graphs (TDG) , a new abstraction that facilitates proof refactoring
+and tactic discovery.
+• We define the semantic proof refactoring problem and show how to use the TDG abstraction to
+refactor proofs in a way that preserves their validity.
+• We propose a new tactic discovery algorithm for assembling a library of tactics from a corpus.
+• We implement these ideas in a tool calledTacMinertargeting Rocq proofs and compare it against
+a baseline [41] that uses anti-unification for tactic discovery. Our method learns around 3× as
+many tactics compared to the baseline, reducing the size of the proof corpus by 26% (compared
+to 9% for the baseline). Furthermore, the tactics learned by our method enabled Copra, a proof
+automation tool, to increase the number of theorems it can prove by 172% on a corpus of 50
+proofs, providing preliminary evidence of these tactics’ utility in automated theorem proving.
+2 Motivating Example
+Lemma eq_trans: forall x y z: res eqs,  
+eq x y -> eq y z -> eq x z. 
+Proof. 
+unfold eq. intros. destruct x.  
+- destruct y. 
+  + destruct z. 
+    * red in H. red in H0. 
+      unfold EqSet.Equal.intros.  
+      rewrite H. rewrite H0. tauto. 
+    * auto. 
+  + tauto.  
+- destruct y. 
+  + destruct z.  
+    * auto. 
+    * auto. 
+  + auto. 
+Qed.
+Lemma eq_sym: forall x y,  
+eq x y -> eq y x. 
+Proof. 
+red. intros. destruct x. 
+- destruct y.  
+  + red in H. 
+    unfold EqSet.Equal.  
+    intros.  
+    rewrite H.  
+    reflexivity. 
+  + auto. 
+- auto. 
+Qed.
+Fig. 3. Input Rocq Proofs.
+In this section, we demonstrate our
+approach through a simple motivat-
+ing example shown in Figure 3. This
+figure shows two simple Rocq proofs,
+eq_sym and eq_trans, taken from
+CompCert [35] for establishing the
+symmetry and transitivity of a pred-
+icate defining a suitable notion of
+equality for dataflow analysis re-
+sults. As standard in Rocq and many
+other interactive theorem provers,
+these are tactic-style proofs , where
+pre-defined tactics such as intros, destruct, rewrite , etc. are used to transform proof goals
+into simpler sub-goals. Our goal in this paper is to learn higher-level (custom) tactics that can be
+used to further simplify proof engineering in a specific domain.
+While the two proofs shown in Figure 3 have salient differences, they also have many similarities,
+as highlighted in color in the figure. In fact, given these two proofs, we can extract the following
+custom tactics that may be used to simplify several other proofs:
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 4 =====
+343:4 Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig
+Ltac simplRewrite H := red in H; rewrite H.
+Ltac destructUnfold n H := destruct n; [unfold H; intros | auto].
+The first custom tactic called simplRewrite is useful in hypothesis H which contains a function
+or expression that requires some reduction before rewriting. In particular, this tactic first simplifies
+the hypothesis H by performing one step of reduction, and then uses that simplified hypothesis
+to rewrite the goal. The second tactic, called destructUnfold, is useful in scenarios that require
+handling different cases of an inductive type through unfolding and proof automation, respectively.
+Figure 4 shows the refactored version of the proofs from Figure 3 using these custom tactics.
+Lemma eq_trans_compr: forall x y z:  
+res eqs, eq x y -> eq y z -> eq x z. 
+Proof. 
+unfold eq. intros. destruct x. 
+- destruct y.  
+  + destructUnfold z EqSet.Equal. 
+    simplRewrite H. simplRewrite H0. 
+    tauto. 
+  + contradiction.  
+- destruct y. 
+  + destruct z.  
+    * auto. 
+    * auto. 
+  + auto. 
+Qed.
+Lemma eq_sym_compr: forall x y: 
+res eqs, eq x y -> eq y x. 
+Proof. 
+red. intros. destruct x. 
+destructUnfold y EqSet.Equal. 
+-simplRewrite H. 
+reflexivity. 
+- auto. 
+Qed.
+Fig. 4. Refactored proofs from Figure 3 using the custom tactics.
+Proof Refactoring. As a first step
+towards tactic discovery, we pose
+the question “Can we, and, if so how
+do we, refactor proofs using a given
+custom tactic?”. At first glance, it is
+unclear how to refactor the proofs
+from Figure 3 to use our custom tac-
+tics. First, the pre-defined tactics com-
+prising the custom tactic do not ap-
+pear consecutively in either of the
+proofs. Second, the destructUnfold
+tactic spans multiple cases of the
+original proof, but its first branch
+does not exactly correspond to either of the branches of the original tactic. Third, even
+if a proof uses the same pre-defined tactics as a custom tactic, this does not necessarily
+mean that a proof can be refactored using that tactic. In particular, because tactic-style
+proofs are stateful objects with implicit sub-goals, there can be subtle dependencies between
+tactic applications that make it impossible to refactor the proof using a given tactic even
+when the proof and the tactic are syntactically similar. All of these considerations highlight
+the need for a suitable abstraction that can facilitate proof refactoring and tactic discovery.
+(p′ ,g) (g′ ,g) (g′ ,g)
+(h,h) (h,h)
+(h1,p)
+(g2,g)
+(g1,p) (g2,g)
+(p′ ,h)(p′ ,g)
+m(𝚍𝚎𝚜𝚝𝚛𝚞𝚌𝚝)
+𝚛𝚎𝚍 𝚒𝚗𝚝𝚛𝚘 𝚒𝚗𝚝𝚛𝚘 𝚒𝚗𝚝𝚛𝚘
+𝚍𝚎𝚜𝚝𝚛𝚞𝚌𝚝𝚊𝚞𝚝𝚘 (g1,g)
+𝚊𝚞𝚝𝚘w(𝚞𝚗𝚏𝚘𝚕𝚍) u(𝚛𝚎𝚍)
+v(𝚛𝚎𝚠𝚛𝚒𝚝𝚎) 𝚛𝚎𝚏𝚕𝚎𝚡𝚒𝚟𝚒𝚝𝚢𝚒𝚗𝚝𝚛𝚘(g′ ,p) (p′ ,g)
+EqSet.Equal
+(EqSet.Equal,h)
+(g′ ,g)
+Fig. 5. TDG for eq_sym.
+Tactic Dependence Graph. To address these
+problems, we propose representing tactic-style
+proofs using an abstraction called the tactic de-
+pendence graph (TDG) that elucidates dependen-
+cies between different tactic applications in a
+proof. Specifically, nodes in a TDG correspond
+to tactic applications, and edges encode how
+the “outputs” of one tactic feed as “inputs” to an-
+other tactic. For instance, consider the TDG rep-
+resentation of the proof for the eq_sym lemma
+shown in Figure 5. Here, an edge from a node
+𝑛 to 𝑛′ indicates that the tactic application represented by 𝑛′ depends on the tactic application
+represented by 𝑛. For example, looking at this TDG, we see that there is no logical dependence
+between the second application of red (node 𝑢) and unfold (node 𝑤 ) even though they appear
+consecutively in the syntax of the proof. On the other hand, the TDG also makes it clear that
+there is an immediate dependency between the second application of red (𝑢) and rewrite (𝑣) even
+though they are separated in syntax by two other tactic applications. Also, note that TDG edges
+elucidate not only whether there exists a dependency between two tactic applications but also how
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 5 =====
+Automated Discovery of Tactic Libraries for Interactive Theorem Proving 343:5
+𝚍𝚎𝚜𝚝𝚛𝚞𝚌𝚝
+(p′ ,g) (g′ ,g) (g′ ,g)
+(g′ ,g)
+(g′ ,g)
+(h,h)
+(g′ ,g)
+(h,h) (h,h)
+(h1,p) (g2,g) (g1,p)(h1,p)
+(g1,g) (g2,g)
+(p′ ,g)
+(p′ ,g) (p′ ,h)
+(p′ ,p)
+(p′ ,g)
+(g2,g)
+(g2,g)
+(g2,g) (g1,g)
+(g1,g)
+(eq,h)
+𝚍𝚎𝚜𝚝𝚛𝚞𝚌𝚝
+𝚒𝚗𝚝𝚛𝚘 𝚒𝚗𝚝𝚛𝚘
+𝚒𝚗𝚝𝚛𝚘𝚒𝚗𝚝𝚛𝚘 𝚒𝚗𝚝𝚛𝚘𝚞𝚗𝚏𝚘𝚕𝚍
+eq
+𝚍𝚎𝚜𝚝𝚛𝚞𝚌𝚝𝚍𝚎𝚜𝚝𝚛𝚞𝚌𝚝
+𝚍𝚎𝚜𝚝𝚛𝚞𝚌𝚝
+𝚊𝚞𝚝𝚘
+𝚊𝚞𝚝𝚘
+𝚊𝚞𝚝𝚘
+𝚛𝚎𝚍
+(g1,g)
+𝚝𝚊𝚞𝚝𝚘
+𝚊𝚞𝚝𝚘
+𝚞𝚗𝚏𝚘𝚕𝚍
+𝚒𝚗𝚝𝚛𝚘
+𝚛𝚎𝚍
+𝚛𝚎𝚠𝚛𝚒𝚝𝚎 𝚛𝚎𝚠𝚛𝚒𝚝𝚎
+𝚝𝚊𝚞𝚝𝚘
+(g′ ,p)
+(EqSet.Equal,h)
+EqSet.Equal
+Fig. 6. TDG for eq_trans.
+they are dependent. In particular, an edge labeled (𝛼, 𝛽 ) indicates that the “formal” output𝛼 of the
+source tactic application is supplied as the “formal” parameter𝛽 of the target tactic application. As
+a matter of convention, we use the symbols ℎ, ℎ𝑖 to denote hypotheses, 𝑔, 𝑔𝑖 to denote goals, and
+𝑝, 𝑝𝑖 to denote propositions that can be either goals or hypotheses. For instance, looking at the same
+TDG, we see that destruct (node 𝑚) produces two goals (labeled 𝑔1, 𝑔2) and a new hypothesis
+(labeled ℎ1). We also notice that the formal outputs𝑔1, 𝑔2 of destruct (node 𝑚) are used by unfold
+(node 𝑤 ) and auto respectively, and that the output hypothesis ℎ1 is used by red (node 𝑢).
+TDG for Proof Refactoring. Next, let’s consider how we might use the TDG for refactoring the
+eq_sym proof from Figure 3 into the form shown in Figure 4. First, observe that the subgraph
+encircled using solid (green) lines in Figure 5 corresponds to the TDG representation of the
+destructUnfold tactic and the subgraph surrounded by orange dashed lines corresponds to that
+of simplRewrite. Hence, we can refactor the original proof by replacing this sequence of tactic
+invocations with the destructUnfold and simplRewrite tactics. Next, there is the question of
+where in the proof these custom tactic invocations belong. Looking at the TDG, we see that an
+input of red (now part of simplRewrite) relies on an output of destruct (which is now a part of
+destructUnfold); hence, we deduce that destructUnfold must occur before simplRewrite in
+the refactored proof. Using this type of reasoning, we can refactor the original proof from Figure 3
+to the version shown in Figure 4 while maintaining its syntactic and semantic validity.
+Tactic Discovery. In addition to being useful for proof refactoring, the TDG abstraction is also
+beneficial for tactic discovery: Given a corpus of proofs, we can identify common proof patterns by
+looking for common isomorphic subgraphs of the TDGs. For instance, comparing the TDGs shown
+in Figure 5 and Figure 6 immediately reveals two common isomorphic subgraphs, highlighted in
+solid (green) and dashed (orange) lines. Hence, the idea behind our tactic discovery algorithm is to
+find isomorphic common subgraphs in the corpus and use them to refactor the proofs. However,
+when learning tactics, there is often a trade-off between the generality of the tactic and its size:
+On one hand, the more frequently a proof pattern appears, the more generally applicable it is.
+On the other hand, the larger the tactic, the more useful it is — intuitively, large tactics allow us
+to skip many steps in the proof. To balance this trade-off, our tactic discovery algorithm looks
+for common isomorphic subgraphs that maximize the total reduction in corpus size, a metric
+that has also been used in prior work on library learning [8, 10]. For instance, going back to our
+running example, the destructUnfold tactic reduces the size of the two proofs by20% whereas the
+simplRewrite tactic reduces size by 10%. Thus, our learning algorithm first refactors the corpus
+using the destructUnfold tactic and then looks for a different tactic that maximizes compression,
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 6 =====
+343:6 Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig
+such as the simplRewrite tactic in our example. This process continues until no new tactics can
+be discovered.
+3 Preliminaries
+This section provides necessary background on interactive theorem proving by developing a formal
+model of tactic-style proofs.
+3.1 Proof States
+A central concept in tactic-style proofs is the notion of proof state, which represents the current
+status of an ongoing proof, including the goals that remain to be established and the hypotheses
+available at each step.
+Definition 3.1 (Proof state). A proof state 𝜎 is a mapping from identifiers (i.e., names like H1) to
+proof elements, which correspond to hypotheses and goals. Ahypothesis is a proposition 𝜑 expressed
+in the formal language of the prover. A goal 𝑔 is a pair (𝜑, C) where 𝜑 is a proposition to be proven
+and the context C is a set of hypothesis identifiers that are in scope when proving 𝑔.
+Given an identifier 𝑣, we write 𝑔(𝑣) to indicate that it represents a proof goal and ℎ(𝑣) to denote
+that it corresponds to a hypothesis. We use the notation Goals(𝜎) to denote the set of goals in the
+proof state 𝜎. Also, given a proof state 𝜎 and a set of identifiers 𝐼, we write 𝜎\𝐼 to denote the new
+proof state obtained by removing identifiers 𝐼 from 𝜎.
+For readability, we omit the context associated with a goal unless necessary. Thus, in most
+examples, we represent the proof state as a mapping from identifiers to propositions, assuming
+that all hypotheses are available when proving a goal unless explicitly stated. Additionally, while
+many ITPs do not explicitly name proof goals—typically operating on a single implicit goal at each
+step—we choose to explicitly name goals to facilitate disambiguation in multi-goal scenarios.
+3.2 Tactics
+In interactive theorem provers, theorems are typically proven by applying tactics to manipulate
+proof states. For example, Table 1 lists our representation of some of the built-in tactics in the Rocq
+theorem prover, along with an (informal) description of their semantics.1 For instance, consider the
+intro tactic shown in Table 1 which is listed as having “signature”𝑔 → ℎ × 𝑔′. This means that
+this tactic operates over a specific goal 𝑔 that is part of the current proof state 𝜎 and transforms the
+proof state if 𝑔 is of the form 𝑝1 → 𝑝2. In particular, the new proof state is obtained by removing
+goal 𝑔 from the current proof state and introducing 𝑝1 as a new hypothesis and 𝑝2 as a new goal.
+Note that some tactics, such as split and destruct, can also introduce multiple new goals, where
+each goal can have its own unique context (such as in the case of destruct).
+In addition to using built-in tactics, proof engineers can also define their own custom tactics, for
+example, via the Ltac construct in Rocq. We represent both built-in and custom tactics through the
+following formalization:
+Definition 3.2 (Tactic definition). A tactic definition is a quadruple (𝜂, 𝐼, 𝑂, E) where 𝜂 is the
+name of the tactic, 𝐼 and 𝑂 are lists of identifiers representing formal tactic inputs and outputs
+respectively, and E is an expression that manipulates a proof state.
+Example 3.1. Consider the following simple tactic in Rocq: Ltac MyTac h := intro h; simpl.
+This custom tactic first applies the built-in intro tactic to introduce a hypothesis ℎ and then
+simplifies the resulting proof goal using simpl. In our representation, this tactic is formalized as:
+(MyTac, [𝑔], [ℎ, 𝑔′′], intros [𝑔] [ ℎ, 𝑔′]; simpl [𝑔′] [ 𝑔′′])
+1Note that Table 1 only provides examples; our implementation supports many more, as explained in Section 7.
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 7 =====
+Automated Discovery of Tactic Libraries for Interactive Theorem Proving 343:7
+Table 1. Our internal representation of some commonly used Rocq tactics, where ℎ denotes a hypothesis, 𝑔
+denotes a goal, and 𝑝 is any proposition (either goal or hypothesis).
+Tactic name Signature Semantics
+intro 𝑔 → ℎ × 𝑔′ If 𝑔 matches 𝑝1 → 𝑝2, produces 𝑝1 as hypothesis ℎ
+and 𝑝2 as goal 𝑔′
+apply .. (in) ℎ × 𝑝 → 𝑝1 (×... × 𝑝𝑛) If ℎ matches 𝑝 → 𝑝1 and 𝑝 is a hypothesis, produces 𝑝1
+as a new hypothesis; if ℎ matches 𝑝1 → .. → 𝑝𝑛 → 𝑝
+and 𝑝 is a goal, produces 𝑝1 × .. × 𝑝𝑛 as new goals
+exact ℎ × 𝑔 → ⊥ If ℎ matches 𝑔, discharges the goal
+(i.e., no new goal is produced)
+split 𝑔 → 𝑔1 × 𝑔2 If 𝑔 is of the form (𝑝1 ∧ 𝑝2), produces 𝑝1 and 𝑝2
+as two new goals 𝑔1 and 𝑔2, respectively
+destruct∨ ℎ × 𝑔 → If ℎ matches (ℎ1 ∨ ℎ2), produces two goals 𝑔1 and 𝑔2,
+ℎ1 × ℎ2 × 𝑔1 × 𝑔2 derived from 𝑔, with corresponding hypotheses ℎ1 and ℎ2
+rewrite ℎ × 𝑝 → 𝑝′ If ℎ matches 𝑥 = 𝑦 and 𝑝 is of the form 𝑝 (𝑥),
+produces 𝑝 (𝑦) as the new proposition 𝑝′
+left / right 𝑔 → 𝑔′ If 𝑔 matches 𝑝1 ∨ 𝑝2, produces 𝑝1 (resp. 𝑝2 for right)
+as a new goal 𝑔′
+Here, the formal input 𝐼 consists of a single goal 𝑔, and the formal output is [ℎ, 𝑔′′], indicating that
+the resulting proof state includes a new hypothesisℎ and a new goal𝑔′′. This explicit representation
+captures which parts of the proof state are modified by a given tactic. Similarly, when specifying
+tactic applications (as in the body of the custom tactic), we explicitly define their inputs and outputs.
+In this case, intros takes the initial goal𝑔, introduces a hypothesisℎ, and produces an updated goal
+𝑔′, which is then further transformed by simpl into 𝑔′′. This formalization clarifies the sequential
+modifications to the proof state.
+In the remainder of this paper, we assume uniqueness of tactic names, and, given a tactic name𝜂,
+we write In(𝜂) and Out(𝜂) to denote its formal inputs and outputs, and Body(𝜂) to denote its body.
+3.3 Tactic Applications
+A tactic application modifies the proof state by taking a set of actual proof elements as inputs
+and producing new proof elements as outputs. Formally, a tactic application is represented as
+a tuple (𝜂, 𝑋 , 𝑌) where 𝜂 is the name of the applied tactic, 𝑋 is the list of actual inputs (e.g.,
+goals, hypotheses), 𝑌 is the list of actual outputs (e.g., new hypotheses, transformed goals). In
+our representation, a tactic application is exactly akin to function invocation with call-by-value
+semantics: Given a tactic definition (𝜂, 𝐼, 𝑂, E) where 𝐼 and 𝑂 denote the formal inputs and outputs,
+respectively, applying 𝜂 involves replacing formal inputs with actual proof elements and executing
+E. More formally, each tactic invocation 𝑡 = (𝜂, 𝑋 , 𝑌) defines a transition relation between proof
+states, denotedJ𝑡K(𝜎) = 𝜎 ′, where 𝜎 ′ = (𝜎\Goals(𝑋 )) ⊎ [ 𝑌 ↦→  JEK( [In(𝜂) ↦→ 𝜎 (𝑋 )] (Out(𝜂))] .
+In particular,J𝑡K(𝜎) modifies the proof state 𝜎 according to body expression E, subject to the usual
+formal-to-actual renamings. Note that inputs of 𝑡 that correspond to proof goals are transformed
+by the tactic invocation; hence, identifiers that refer to “stale” proof goals are removed when
+constructing the new input state 𝜎 ′. Importantly, we assume tactics are deterministic with respect
+to the inputs (i.e., goals, hypotheses, and hint databases) they consume. That is, tactic invocations
+will always produce the same outputs as long as their inputs in the initial proof state are the same,
+even if the rest of the state is different. Given proof state 𝜎 and expression E, we writeJEK(𝜎) to
+denote the resulting state 𝜎 ′ after applying E to 𝜎.
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 8 =====
+343:8 Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig
+Example 3.2. Consider the following tactic application (apply, [H0, g3] , [g4, g5] ) (where the
+semantics of the built-in apply tactic is given in Table 1) and the proof state 𝜎:
+[h1 ↦→ P1, h2 ↦→ P2, H0 ↦→ ( P1 → P2 → P3), g3 ↦→ P3]
+This tactic application results in the following modified proof state 𝜎 ′:
+[h1 ↦→ P1, h2 ↦→ P2, H0 ↦→ ( P1 → P2 → P3), g4 ↦→ P1, g5 ↦→ P2]
+Observe that the hypotheses are still the same, but previous goal g3 is removed from the old proof
+state and two new goals, g4 and g5, are added to 𝜎 ′.
+3.4 Proof Scripts and Proofs
+We conclude this section by defining proof scripts : programs defined by a sequence of tactic
+invocations. A proof corresponds to a successful execution of that program on some initial state.
+Definition 3.3 (Proof script). A proof script 𝜋 is a sequence of tactic invocations.
+Example 3.3. Consider the following lemma:
+Lemma implication: (P1 ∧ P2) -> (P1 -> P2 -> P3) -> P3.
+and its corresponding proof script:
+intros H. destruct H as [h1 h2]. intros H0. apply H0.
+- exact h1.
+- exact h2.
+In our representation, this proof script corresponds to the following sequence of tactic invocations:
+intro [g0] [H, g1]; destruct [H, g1] [h1, h2, g2];
+intro [g2] [H0, g3]; apply [H0, g3] [g4, g5];
+exact [h1, g4] []; exact [h2, g5] [].
+Although the original Rocq script uses bullets (“-”) to indicate a structured proof with multiple
+subgoals, our proof script representation explicitly encodes the logical dependencies between tactics
+as a linear sequence of invocations. In particular, the apply H0 tactic introduces two subgoals,
+labeled g4 and g5, which are subsequently solved by exact h1 and exact h2 , respectively.
+Finally, we define a proof as a successful execution of a proof script on some initial state:
+Definition 3.4 (Proof). Let 𝜎0 be a proof state and 𝜋 = 𝑡1; . . . ; 𝑡𝑛 be a proof script. Executing 𝜋 on
+𝜎0 yields a sequence of states (i.e., trace) 𝜎1, . . . 𝜎𝑛 where 𝜎𝑖+1 =J𝑡𝑖K(𝜎𝑖 ). We say that 𝜋 is a proof of
+𝜎0 if 𝜎𝑛 does not contain any goal identifiers in its domain.
+Example 3.4. Consider the initial proof state, which corresponds to our lemma to be proven from
+Example 3.3: 𝜎0 : [g0 ↦→ (( P1 ∧ P2) → ( P1 → P2 → P3) → P3)]. Executing the proof script from
+Example 3.3 results in the following trace:
+𝜎1 : [H ↦→ ( P1 ∧ P2), g1 ↦→ ( ( P1 → P2 → P3) → P3) ]
+𝜎2 : [h1 ↦→ P1, h2 ↦→ P2, g2 ↦→ ( ( P1 → P2 → P3) → P3) ]
+𝜎3 : [h1 ↦→ P1, h2 ↦→ P2, H0 ↦→ ( P1 → P2 → P3), g3 ↦→ P3]
+𝜎4 : [h1 ↦→ P1, h2 ↦→ P2, H0 ↦→ ( P1 → P2 → P3), g4 ↦→ P1, g5 ↦→ P2]
+𝜎5 : [h1 ↦→ P1, h2 ↦→ P2, H0 ↦→ ( P1 → P2 → P3), g5 ↦→ P2]
+𝜎6 : [h1 ↦→ P1, h2 ↦→ P2, H0 ↦→ ( P1 → P2 → P3) ]
+Since 𝜎6 does not contain any goals, this constitutes a proof of our lemma.
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 9 =====
+Automated Discovery of Tactic Libraries for Interactive Theorem Proving 343:9
+4 Semantic Proof Refactoring
+To define our tactic discovery problem, we first consider: “What makes a custom tactic useful?” In
+our setting, a necessary requirement is that the tactic can be applied to refactor existing proofs
+in a way that yields a desirable outcome—be it reduced proof size, improved maintainability, or
+some other benefit. In this section, we formally introduce the concept of proof refactoring. Instead
+of relying on brittle, syntactic notions, our approach takes a semantic perspective by representing
+tactic-style proofs with tactic dependency graphs ( TDG).
+Definition 4.1 (TDG of proof script). Let 𝜋 be a proof script. A tactic dependence graph for 𝜋,
+denoted TDG(𝜋), is a directed acyclic graph 𝐺 = (𝑉 , 𝐸) where each node 𝑣 (𝜂) ∈ 𝑉 corresponds to
+a tactic invocation 𝑡 = (𝜂, 𝑋 , 𝑌) ∈ 𝜋 and each arc (𝑠 (𝜂), 𝑡(𝜂′), 𝛽, 𝛼) indicates that the formal input
+𝛼 for tactic invocation 𝑡 (𝜂′) corresponds to the formal output 𝛽 for tactic invocation 𝑠 (𝜂).
+Example 4.1. Figure 7 shows the TDG for the proof script from Example 3.3. Here, an edge labeled
+(𝑎, 𝑏) indicates the formal output 𝑎 of the source node corresponds to the formal input 𝑏 of the
+target node. We use the signatures shown in Table 1 to refer to the formal inputs and outputs of
+Rocq’s built-in tactics. For example, the edge from 𝜈3 to 𝜈4 labeled (𝑔′, 𝑝) indicates that formal
+output 𝑔′ of the intro tactic becomes the formal input 𝑝 of the apply tactic.
+(g′ ,g)
+(H,𝚑𝟶)
+(g′ ,p)(h,h)
+(g′ ,g)
+(h,h)
+v1(𝚒𝚗𝚝𝚛𝚘)
+v4(𝚊𝚙𝚙𝚕𝚢)
+v5(𝚎𝚡𝚊𝚌𝚝) v6(𝚎𝚡𝚊𝚌𝚝)
+(p1,g)(p2,g)
+(h1,h) (h2,h)
+v3(𝚒𝚗𝚝𝚛𝚘)
+v2(𝚍𝚎𝚜𝚝𝚛𝚞𝚌𝚝)
+Fig. 7. TDG for Ex 3.3.
+In general, multiple syntactically different proof scripts can have the
+same TDG. Given a graph 𝐺, we use InducedProofs(𝐺) to denote the set
+of all proof scripts Π = {𝜋1, . . . , 𝜋𝑘 } such that 𝐺 is isomorphic to TDG(𝜋 𝑗 ).
+Thus, we can view a TDG as representing a combinatorially large class of
+syntactically different, but semantically equivalent, proof scripts. We can
+obtain all induced proofs of 𝐺 by considering all topological sorts of 𝐺 that
+satisfy branching constraints of the original proof (see Section 7 for more
+details).
+Note that we can also represent a tactic definition as aTDG as long as its
+body expression can be expressed as a sequence of other tactic invocations.
+However, to simplify the presentation of our algorithms, we augment the
+TDG for each tactic definition with two special nodes to represent their
+formal inputs and outputs.
+Definition 4.2 (Tactic TDG). Let 𝜏 = (𝜂, 𝐼, 𝑂, 𝜋 ) be a tactic definition where 𝜋 is a sequence of
+tactic invocations, and let 𝐺𝜋 = (𝑉𝜋, 𝐸𝜋 ) be the TDG of 𝜋. The TDG of 𝜏 is a directed acyclic graph
+𝐺 = (𝑉 , 𝐸) such that 𝑉 = 𝑉𝜋 ∪ {𝑣in, 𝑣out} where 𝑣in, 𝑣out represent the formal inputs and outputs of
+𝜏 respectively. Furthermore, let 𝐼𝛼𝑖,𝛽 𝑗 denote the set of all tactic invocations of the form (𝜂′, _, _)
+where the formal input 𝛼𝑖 of 𝜏 corresponds to formal input 𝛽 𝑗 of 𝜂′, and let 𝑂𝛼𝑘 ,𝛽𝑙 denote the set of
+all tactic invocations of the form (𝜂′, _, _) where the formal output 𝛼𝑘 of 𝜏 corresponds to formal
+output 𝛽𝑙 of 𝜂′. Then, 𝐺 contains edges:
+𝐸 = 𝐸𝜋 ∪
+Ø
+𝑖 𝑗
+𝐼𝛼𝑖,𝛽 𝑗 ∪
+Ø
+𝑘𝑙
+𝑂𝛼𝑘 ,𝛽𝑙
+u(𝚒𝚗𝚝𝚛𝚘)
+in
+w(𝚎𝚡𝚊𝚌𝚝)
+out
+(𝚐,g) (𝚑,h)
+(h,p)
+(g′ ,g) (p1,h)
+(h,𝚑𝟶) (p1,𝚑𝟷)
+(𝚑,H)
+v(𝚊𝚙𝚙𝚕𝚢)
+Fig. 8. Tactic TDG for Ex. 4.2.
+In other words, the TDG for a tactic contains special nodes and
+edges that connect formal inputs and outputs in the tactic defini-
+tion to the formal inputs and outputs of other tactic invocations.
+Example 4.2. Consider the following tactic definition in Rocq:
+Ltac myTac h h0 h1:= intro h0; apply h0 in h as h1; exact h1.
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 10 =====
+343:10 Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig
+In our internal representation, this tactic takes two formal argu-
+ments, namely goal g and hypothesis h, and has two formal outputsh0 and h1. The body expression
+of this tactic is represented using the following sequence of tactic invocations:
+intro [g] [h0, g1]; apply [h, h0] [h1]; exact [h1, g1] []
+Figure 8 shows the TDG representation of this tactic. Note that there is an edge from node 𝑢 to the
+special exit node labeled (ℎ, h0) since the formal output ℎ of the intro tactic becomes the formal
+output h0 of the custom tactic. The edge between 𝜈 and the exit node is labeled (𝑝1, h1) similarly.
+Intuitively, a proof script 𝜋 could be refactored using a tactic 𝜏 if 𝜏 is a subgraph of 𝜋 modulo
+isomorphism, subject to some extra restrictions. To make this more precise, we define isomorphic
+embedding in the context of TDG.
+Definition 4.3 (Isomorphic embedding). A tactic TDG 𝐺 = (𝑉 , 𝐸) is an isomorphic embedding
+into a proof TDG 𝐺 ′ = (𝑉 ′, 𝐸′) iff there exists an injective function𝑓 : 𝑉 \{𝑣in, 𝑣out} → 𝑉 ′ such that:
+(1) Every vertex in 𝑉 \{𝑣in, 𝑣out} is mapped to a vertex of 𝐺 ′ with the same tactic name, i.e.,
+∀𝑣 ∈ 𝑉 .∃𝑣 ′ ∈ 𝑉 ′.𝑓 (𝑣 (𝜂)) = 𝑣 ′ (𝜂)
+(2) Every non-special edge in 𝐺 is mapped to a corresponding edge of 𝐺 ′ with the same edge label :
+∀(𝑠, 𝑡, 𝛽, 𝛼 ) ∈ 𝐸. (𝑠 ≠ 𝑣in ∧ 𝑡 ≠ 𝑣out) → ∃( 𝑠 ′, 𝑡′, 𝛽, 𝛼) ∈ 𝐸′.𝑓 (𝑠) = 𝑓 (𝑠 ′) ∧ 𝑓 (𝑡) = 𝑓 (𝑡 ′)
+We refer to this injective function 𝑓 as the witness.
+(g′ ,p) (h,h)
+(p1,g)
+(𝚑,h)
+u(𝚒𝚗𝚝𝚛𝚘)
+v(𝚊𝚙𝚙𝚕𝚢)
+w(𝚎𝚡𝚊𝚌𝚝)
+in
+(𝚐,g)
+out
+(h,𝚑′ )
+Fig. 9. TDG for Ex 4.3.
+The two conditions in the above definition ensure agreement between
+labels of nodes and edges between the tactic TDG 𝐺 and the proof TDG 𝐺 ′
+that 𝐺 is embedded into. However, it turns out that finding an isomorphic
+embedding between a tactic 𝜏 and a proof script 𝜋 is a necessary but not
+sufficient condition for refactoring 𝜋 using 𝜏. To see why this is the case,
+consider two TDGs, one with edges {a  b, b  c, a  c}, and another
+with edges {a  d, d  c, a  c}. While the subgraph consisting of nodes
+a and c appears in both proofs, it is not possible to extract a valid tactic that
+isolates these two steps. This is because node c depends on a node outside
+the tactic, which in turn relies on an intermediate result produced by the
+tactic, preventing it from being used as a standalone argument. To avoid this
+issue, we must additionally ensure that the subgraph of 𝜋 that is isomorphic to 𝜏 is collapsible into
+a single node, meaning that we can replace all incoming edges into the subgraph with the special
+entry node of the tactic and all outgoing edges with the special exit node. We formalize this using
+the definition below:
+Definition 4.4 (Collapsible embedding). Let 𝐺 = (𝑉 , 𝐸), 𝐺 ′ = (𝑉 ′, 𝐸′) be the TDG’s for a tactic
+definition 𝜏 and proof script 𝜋 respectively such that 𝐺 is an isomorphic embedding into 𝐺 ′ with
+witness function 𝑓 . Let 𝐺 ⊢ 𝑢 { 𝑣 denote that node 𝑣 is reachable from node 𝑢 in graph 𝐺. We say
+that 𝐺 ′ is 𝑓 -collapsible iff both of the following conditions hold:
+(1) ∀𝑢, 𝑣 ∈ Range(𝑓 ).∀𝑤 ∈ 𝑉 ′. (𝐺 ′ ⊢ 𝑢 { 𝑤 ∧ 𝐺 ′ ⊢ 𝑤 { 𝑣) ⇒ 𝑤 ∈ Range(𝑓 )
+(2) ∀𝑢, 𝑣 ∈ Dom(𝑓 ).∀𝑒 ∈ 𝐸′. 𝑒 = (𝑓 (𝑢), 𝑓 (𝑣), 𝛼, 𝛽) ⇒ ( 𝑢, 𝑣, 𝛼, 𝛽 ) ∈ 𝐸
+Here, the first condition states that, if we have 𝑓 (𝑎) = 𝑢 and 𝑓 (𝑏) = 𝑣 and there is a path from 𝑢
+to 𝑣 that includes 𝑤 in the middle, then 𝑓 must also map some node 𝑐 ∈ 𝑉 to 𝑤 . On the other hand,
+the second condition states that if 𝐺 ′ includes an edge between any pair of vertices that are in the
+range of 𝑓 , then the corresponding edge must also exist in 𝐺.
+To see why we require the first property, note that any valid proof script induced by𝐺 ′ must
+include tactic invocations in the order 𝑢, 𝑤, 𝑣 since 𝑤 depends on an output of 𝑢 and 𝑣 depends
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 11 =====
+Automated Discovery of Tactic Libraries for Interactive Theorem Proving 343:11
+on an output of 𝑤 . Thus, if 𝑓 had only 𝑢, 𝑣 in its range but not 𝑤 , the refactored proof could not
+allow the tactic invocations 𝑢, 𝑣, 𝑤 in the required order, thereby resulting in an invalid proof script.
+Additionally, we need the second property because a candidate tactic 𝐺 is not a valid embedding
+unless it includes all required dependencies between a pair of tactic invocations. Intuitively, these
+conditions enforce that, if we replace the subgraph of 𝐺 ′ that is isomorphic to 𝐺 with a single node
+representing a new tactic invocation, then the resulting proof is still valid.
+Example 4.3. Consider the proof script and its corresponding TDG from Figure 7. We give examples
+and non-examples of collapsible isomorphic embeddings.
+(1) Consider the tactic from Example 4.2 and its TDG in Figure 8. Note that both the proof script
+and the tactic contain the sequence of tactic invocations intro, apply, exact. However, the
+function [𝑢 ↦→ 𝑣2, 𝑣 ↦→ 𝑣3, 𝑤 ↦→ 𝑣4] does not define an isomorphic embedding because it does
+not satisfy condition (2) from Definition 4.3.
+(2) Now consider the following tactic definition, whose TDG is shown in Figure 9.
+Ltac myTac2 h0 h := intro h0. apply h0. exact h.
+In our representation, this tactic has formal inputsg and h and output h’. The TDG from Figure 9
+is an isomorphic embedding into Figure 7 with the witness function [𝑢 ↦→ 𝑣3, 𝑣 ↦→ 𝑣4, 𝑤 ↦→ 𝑣5].
+(3) Now, consider a subgraph 𝐺1 of the
+TDG in Figure 9 that does not contain
+node 𝑣 as well as its incoming and out-
+going edges. Then, the witness func-
+tion 𝑓 from part (2) of this example
+is an isomorphic embedding but it is
+not collapsible, as it violates part (1)
+of Definition 4.4.
+(4) Next, consider a modified version 𝐺2
+of Figure 9 that does not contain the
+edge labeled (ℎ, ℎ) between 𝑢, 𝑣. Then,
+the same witness function 𝑓 still de-
+fines an isomorphic embedding but it
+violates part (2) of Definition 4.4. Intu-
+itively, 𝐺2 is not a valid tactic modulo
+the original proof because it omits a
+required dependency between intro
+and apply.
+Our proof refactoring procedure is pre-
+sented in Algorithm 10: It takes as input
+a proof script 𝜋 and a tactic definition 𝜏,
+and returns a refactored proof script of𝜋.
+The algorithm first constructs the TDG’s
+𝐺, 𝐺𝑐 for the tactic 𝜏 and proof script 𝜋
+respectively (line 2) and then it repeat-
+edly contracts 𝐺𝑐 in the while loop (lines
+3–12) by finding a collapsible
+1: procedure Refactor(𝜏, 𝜋)
+input: A tactic definition 𝜏 and a proof script 𝜋.
+output: A refactored proof script of 𝜋 ′
+2: 𝐺, 𝐺𝑐 ← ConstructTDG(𝜏), ConstructTDG(𝜋)
+3: while true do
+4: 𝑓 ← FindEmbedding(𝐺, 𝐺𝑐 )
+5: if 𝑓 ≡ ⊥ then break
+6: 𝑉 ← { 𝑣 | 𝑣 ∈ Nodes(𝐺𝑐 ) ∧ 𝑣 ∈ Range(𝑓 )}
+7: for all 𝑣 ∈ 𝑉 do
+8: for all 𝑢 ∈ Parents(𝑣) \ Range(𝑓 ) do
+9: 𝐺𝑐 ← RewireIn(𝑢, 𝑣, 𝐺, 𝐺𝑐 )
+10: for all 𝑢 ∈ Children(𝑣) \ Range(𝑓 ) do
+11: 𝐺𝑐 ← RewireOut(𝑢, 𝑣, 𝐺, 𝐺𝑐 )
+12: 𝐺𝑐 ← Contract(𝐺𝑐, 𝑉 , 𝑣(𝜏 .𝜂))
+13: return 𝜋 ′ ∈ ( InducedProofs(𝐺𝑐 ))
+Fig. 10. Procedure for refactoring a proof script 𝜋 using
+tactic 𝜏. This procedure uses auxiliary procedures RewireIn
+(resp. RewireOut) to change the labels of the incoming (resp.
+outgoing) edges of 𝑣. Given edge (𝑣 ′, 𝑣, 𝛼, 𝛽) in the TDG
+𝐺𝑐 of 𝜋 with corresponding edge (𝑣in, 𝑓 −1 (𝑣), 𝛾, 𝛽) in the
+TDG 𝐺 of 𝜏, RewireIn replaces that edge with (𝑣 ′, 𝑣, 𝛼, 𝛾).
+Similarly, given edge (𝑣 ′, 𝑣, 𝛼, 𝛽) in 𝐺𝑐 with corresponding
+edge (𝑓 −1 (𝑣 ′), 𝑣out, 𝛼, 𝛾) in 𝐺, RewireOut replaces that edge
+with (𝑣 ′, 𝑣, 𝛾, 𝛽). Also, FindEmbedding finds a collapsible iso-
+morphic embedding of 𝐺 into 𝐺𝑐 and Contract performs
+standard graph contraction.
+isomorphic embedding of 𝐺 into 𝐺𝑐 (line 4). If FindEmbedding does not return a witness (line 5),
+further refactoring is not possible, so the algorithm returns any one of the induced proofs associated
+with 𝐺𝑐 (line 13). Otherwise, the algorithm proceeds in two steps. First, recall that the identifiers
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 12 =====
+343:12 Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig
+used in the tactic definition 𝜏 are different from those used in the original tactic invocation, so we
+need to change the edge labels to ensure that the refactoring is correct. This is done in lines 8-11
+using functions called RewireIn and RewireOut. In particular, given a node 𝑣 whose parent 𝑢 is not
+part of the embedding, we need to change the incoming edges to 𝑣 to use the correct identifier for
+𝜏 using the special entry edges in 𝐺 from 𝑣in to 𝑓 −1(𝑣). RewireOut does something very similar
+but for “exit” edges whose children are not part of the embedding. Finally, the second step (call to
+Contract at line 12) replaces the subgraph of 𝐺𝑐 induced by vertices 𝑉 with a single fresh node
+𝑣 (𝜏 .𝜂) where 𝜏 .𝜂 is the name of tactic 𝜏. Since the replacement of a subgraph with a single node is
+the standard graph contraction operation [16], we do not provide the implementation of Contract.
+u2(𝚊𝚙𝚙𝚕𝚢)u1(𝚊𝚙𝚙𝚕𝚢)
+v2(𝚎𝚡𝚊𝚌𝚝)
+(g′ ,g)
+(g′ ,g)
+(g′ ,g)(h,h)
+(h,h) (h,h)
+(h1,p) (h2,p)
+(g1,g) (g2,g)
+(g′ ,g) (g′ ,g)
+(p1,h) (p1,h)
+𝚍𝚎𝚜𝚝𝚛𝚞𝚌𝚝
+𝚒𝚗𝚝𝚛𝚘
+𝚒𝚗𝚝𝚛𝚘 𝚒𝚗𝚝𝚛𝚘
+v1(𝚎𝚡𝚊𝚌𝚝)
+𝚕𝚎𝚏𝚝𝚛𝚒𝚐𝚑𝚝
+(a) Original proof TDG
+(H,𝚑𝟶)
+u(𝚊𝚙𝚙𝚕𝚢)
+(p1,h)
+in
+out
+(𝚑𝟶,h) (𝚑𝟷,p)
+(𝚐,g)
+(p1,𝚑𝟸)
+v(𝚎𝚡𝚊𝚌𝚝) (b) A new tactic
+𝚒𝚗𝚝𝚛𝚘(g′ ,g)
+(g′ ,g)
+(g′ ,g) (h,h)
+(h,𝚑𝟶)
+(h1,𝚑𝟷) (h2,𝚑𝟷)
+(g1,g)
+(g′ ,𝚐) (g′ ,𝚐)
+(g2,g)
+(h,𝚑𝟶)
+v1(𝚗𝚎𝚠𝚃𝚊𝚌) v2(𝚗𝚎𝚠𝚃𝚊𝚌)𝚍𝚎𝚜𝚝𝚛𝚞𝚌𝚝
+𝚛𝚒𝚐𝚑𝚝
+𝚒𝚗𝚝𝚛𝚘
+𝚒𝚗𝚝𝚛𝚘
+𝚕𝚎𝚏𝚝 (c) Refactored proof
+Fig. 11. Refactoring a proof using a new tactic.
+Example 4.4. Consider the following Rocq proof and its TDG shown in Figure 11(a):
+Lemma example: (A -> D) -> (B -> C) -> ((A \/ B) -> (C \/ D)).
+Proof. intro. intro. intro. destruct H1.
+- apply H in H1. right. exact H1.
+- apply H0 in H1. left. exact H1.
+Also, consider the following tactic whose TDG is shown in Figure 11(b):
+Ltac newTac h h ' := apply h in h '. exact h '.
+This tactic can be embedded into the proof using the witness functions 𝑓1 : [𝑢 ↦→ 𝑢1, 𝑣 ↦→ 𝑣1] and
+𝑓2 : [𝑢 ↦→ 𝑢2, 𝑣 ↦→ 𝑣2], and Figure 11(c) shows the refactored TDG representing the following proof:
+Proof. intro. intro. intro. destruct H1.
+- right. newTac H H1.
+- left. newTac H0 H1.
+Remark. If there are multiple collapsible embeddings of a tactic 𝜏 into a proof 𝜋 such that these
+embeddings overlap, then the result of Refactor may not be unique, depending on which embed-
+ding is discovered first. For simplicity, the rest of the paper assumes that collapsible embeddings do
+not overlap; however, our implementation handles this situation (see Section 7).
+5 Tactic Library Synthesis Problem
+In this section, we formalize the tactic discovery problem addressed in the rest of this paper.
+Definition 5.1 (Tactic discovery problem). Let Π be a corpus of proof scripts, and let O : (𝜏 ×
+Π) → R be an objective function that evaluates the quality of a tactic 𝜏 on Π. The goal of the tactic
+discovery problem is to find a tactic 𝜏 that maximizes O (i.e., arg max𝜏 O (𝜏, Π)).
+While the optimization objective O could be defined in a number of ways, we mainly consider
+compression power as our primary objective, even though our learning algorithm can also be adapted
+to handle other types of measures, as long as O (𝜏, Π) can be defined as:
+O (𝜏, Π) = 𝑓  Π, Refactor(Π, 𝜏),
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 13 =====
+Automated Discovery of Tactic Libraries for Interactive Theorem Proving 343:13
+where 𝑓 is some function Π × Π′ → R and Refactor is the refactoring operation defined in the
+previous section. In particular, prior work on library learning in the program synthesis literature [8,
+10, 18] has argued that reducing the overall size of a corpus—i.e., maximizing how much a learned
+abstraction “compresses” existing code—is an effective proxy for identifying broadly applicable
+patterns. Hence, we define an adaptation of compression power to the ITP setting.
+Definition 5.2 (Compression power). Given proof corpus and tactic𝜏, let Π′ = {𝜋 ′ | 𝜋 ∈ Π ∧𝜋 ′ =
+Refactor(𝜋, 𝜏)}. Then, the compression power of 𝜏 modulo Π, denoted CP(𝜏, Π), is:
+CP(𝜏, Π) =
+ Í
+𝜋 ∈Π Size(𝜋)Í
+𝜋 ′ ∈Π′ Size(𝜋 ′)
+
+Intuitively, the larger the compression power, the more effective the tactic is in reducing the
+corpus size. Finally, we can define the tactic library discovery problem as follows:
+Definition 5.3 (Library synthesis problem). Let Π1 be a corpus of proof scripts. The tactic
+library synthesis problem is to find a sequence of tactics 𝜏1, . . . , 𝜏𝑛 such that each 𝜏𝑖 is a solution to
+the tactic discovery problem for corpus Π𝑖 = Refactor(𝜏𝑖 −1, Π𝑖 −1).
+Remark. One might consider defining the library synthesis problem as finding a set of tactics
+that collectively achieve the maximum compression power for the proof corpus. However, the
+compression power of a set of tactics depends on the order in which those tactics are applied. This
+makes such a definition either ill-formed or necessitates evaluating all possible permutations of
+tactic application orders, which is computationally infeasible and, in our small-scale experiments,
+yields no meaningful gain in compression. Consequently, we mirror prior library-learning works
+[8, 41] and formulate the library synthesis problem as finding a sequence of tactics that achieve
+maximal compression at each step.
+6 Learning Tactic Libraries
+We now describe our learning technique for discovering useful tactics from a given corpus.
+6.1 Preliminary Definitions
+We start this section by presenting some definitions that are useful for describing our algorithm.
+Definition 6.1 (Witness set). Let 𝐺, 𝐺′ be the TDG’s of a tactic and proof script respectively. A
+witness set of 𝐺 and 𝐺 ′, denoted Υ(𝐺, 𝐺′), is the set of all witness functions proving that 𝐺 is an
+isomorphic embedding into 𝐺 ′.
+In this definition, we deliberately do not require a collapsible isomorphic embedding; specifically,
+𝑓 only needs to satisfy Definition 4.3. As we will demonstrate later in this section, our algorithm
+incrementally constructs the witness set and subsequently filters out non-collapsible candidates.
+This approach is necessary because the collapsibility criterion cannot be enforced incrementally.
+Definition 6.2 (Embedding vector). An embedding vector Λ for a tactic 𝜏 and a proof corpus Π
+is a mapping from each proof 𝜋 ∈ Π to the witness set Υ(TDG(𝜏), TDG(𝜋)).
+That is, an embedding vector for 𝜏 maps each proof 𝜋 to the witness set between 𝜏 and 𝜋.
+Definition 6.3 (Tactic candidate). A tactic candidate Ψ for a proof corpus Π is a pair (𝐺, Λ)
+where 𝐺 is a TDG and Λ is an embedding vector of 𝐺 for Π.
+Given a tactic candidate Ψ = (𝐺, Λ), we write Ψ.𝐺 to denote 𝐺 and Ψ.Λ to denote Λ. Intuitively,
+𝐺 represents a TDG that could be used to refactor some proofs in the corpus, and its embedding
+vector Λ allows us to efficiently compute witnesses for TDG’s that are extensions of𝐺. As we will
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 14 =====
+343:14 Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig
+see in the next section, our tactic discovery algorithm uses the tactic candidate data structure as a
+key building block when searching for valid tactics.
+Definition 6.4 (Frequency). Let Ψ = (𝐺, Λ) be a tactic candidate and Π a proof corpus. The
+frequency of Ψ in Π, denoted 𭟋(Ψ, Π), is defined as follows:
+𭟋(Ψ, Π) =
+∑︁
+𝜋 ∈Π
+∑︁
+𝑓 ∈Υ (𝐺,TDG(𝜋 ) )
+1[IsCollapsible(𝑓 , 𝐺, TDG(𝜋))]
+where 1[·] is the standard indicator function and IsCollapsible(𝑓 , 𝐺, 𝐺′) evaluates to true iff 𝑓
+defines a collapsible isomorphic embedding of 𝐺 ′ into 𝐺.
+Intuitively, the frequency of a tactic candidate Ψ counts the number of times that Ψ can be
+used in refactoring the proofs in the corpus. The higher the frequency of a tactic candidate,
+the more frequently it can be applied when refactoring proofs in the corpus. However, to eval-
+uate how useful a tactic is in compressing the corpus size, we also need to take into account
+the size of the tactic. To this end, we define the effectiveness of a tactic candidate as follows:
+1: procedure LearnTactic(Π)
+input: A proof corpus Π
+output: A tactic 𝜏 that achieves maximum compression of Π
+2: G ← ConstructTDGs(Π)
+3: 𝑅 ← LearnGraphGrammar(G)
+4: W ← InitWorklist(𝑅, Π)
+5: 𝑟 ← { Candidate = ⊥, Eff = 0}
+6: while W ≠ ∅do
+7: Ψ ← W .dequeue()
+8: if UpperBound(Ψ, Π) < 𝑟 .Eff then continue
+9: if E (Ψ, Π) > 𝑟 .Eff then
+10: 𝑟 ← { Candidate = Ψ, Eff = E (Ψ, Π)}
+11: W.enqueue(Expand(Ψ, 𝑅, Π))
+12: return MakeTactic(𝑟 .Candidate)
+Fig. 12. Procedure for learning a tactic that results in maximum
+compression of proof corpus Π. Procedure names that are in Small-
+Caps font are defined in separate algorithms and explained in the
+rest of this section. On the other hand, procedure names that are
+written in Sans Serif font are only explained in text. At a high level,
+this algorithm iteratively explores tactic candidates, pruning those
+whose expansions cannot yield a higher compression power than a
+previously encountered tactic.
+Definition 6.5 (Effectiveness).
+Let Ψ = (𝐺, Λ) be a tactic candi-
+date and Π a proof corpus. The
+effectiveness of Ψ in Π, denoted
+E (Ψ, Π), is defined as E (Ψ, Π) =
+(Size(𝐺) − 1) × 𭟋(Ψ, Π).
+In other words, effectiveness
+takes into account both the fre-
+quency and the size of the tactic.
+In this definition, we subtract 1
+from the size of 𝐺, because when
+an embedding of the tactic is used
+for contracting the proof, the size
+of the proof shrinks bySize(𝐺) −1.
+Intuitively, E (Ψ, Π) can be used to
+accurately characterize the com-
+pression power of a tactic – the
+higher the value of E (Ψ, Π), the
+more effective Ψ is for compress-
+ing the proof corpus Π.
+As we will see in the next sec-
+tion, our algorithm uses this met-
+ric as a pruning criterion during
+search.2
+6.2 Tactic Discovery Algorithm
+In this section, we describe our algorithm for learning a single tactic that maximizes the desired
+objective. Our top-level algorithm, called LearnTactic, is presented in Figure 12: It takes in a proof
+corpus Π and returns a single tactic𝜏 that maximizes CP(𝜏, Π). The algorithm starts by constructing
+TDG’s for each proof in the corpus and then calls theLearnGraphGrammar procedure (described
+2To adapt our learning algorithm in Section 6.2 to optimization objectives other than compression power, one needs to
+define a suitable instantiation of function E for the corresponding objective.
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 15 =====
+Automated Discovery of Tactic Libraries for Interactive Theorem Proving 343:15
+later), for learning a graph grammar 𝑅 that can be used to construct TDG’s of tactic candidates.
+Intuitively, 𝑅 encapsulates recurring patterns within the proof corpus and provides a set of rules to
+guide the exploration of potential tactic candidates.
+Lines 4-11 of LearnTactic systematically explore different tactic candidates. Specifically, the
+algorithm initializes the worklist W with all the single-node tactics from the grammar 𝑅 and
+initializes a record 𝑟 to track the best tactic discovered so far. In each iteration of the loop (lines
+6–11), the algorithm dequeues an existing tactic candidateΨ and decides whether or not to continue
+expanding it. In particular, if it can prove that no expansion of Ψ will result in a higher compression
+power than the best discovered tactic, it discards Ψ from the search space. Otherwise, it proceeds
+to compute the actual effectiveness of Ψ using the function E (Ψ, Π) from Definition 6.5. If E (Ψ, Π)
+exceeds that of the previous best tactic, the result 𝑟 is updated to Ψ. Additionally, since expansions
+of Ψ might have even higher compression power, the algorithm invokes the Expand procedure to
+obtain other candidate tactics that can be produced by expanding Ψ using the productions in 𝑅.
+Upon termination, 𝑟 contains a tactic that maximizes compression power for the entire corpus. In
+the remainder of this section, we elaborate on the auxiliary procedures used in LearnTactic.
+Learning Graph Grammar. While our tactic learning algorithm is inspired by top-down enumer-
+ative program synthesis [23, 38], a key difference is that we do not have a context-free grammar
+defining the space of possible TDGs. Hence, our algorithm first learns a graph grammar that can be
+used to construct TDG’s of possible tactics by analyzing the proof corpus.
+𝐺 ∈ G 𝑣 (𝜂) ∈ Nodes(𝐺) 𝑣 ′ (𝜂′) ∈ Nodes(𝐺) 𝜃 = {(𝛼, 𝛽 ) | ( 𝑣 (𝜂), 𝑣′ (𝜂′), 𝛼, 𝛽) ∈ Edges(𝐺)}}
+G ⊢ 𝜂  (𝜂′, 𝜃)
+Fig. 13. Inference rule defining the LearnGraphGrammar procedure
+Definition 6.6 (TDG grammar). A TDG grammar is defined by a set of production rules of
+the form 𝜂  (𝜂′, 𝜃), where each rule specifies that a single-node graph 𝐺 = ({𝑣 (𝜂)}) can be
+transformed into a new graph 𝐺 ′ = ({𝑣 (𝜂), 𝑣(𝜂′)}, {(𝑣 (𝜂), 𝑣(𝜂′), 𝛼, 𝛽) | ( 𝛼, 𝛽 ) ∈ 𝜃 }).
+Intuitively, each production 𝜂 → ( 𝜂′, 𝜃) states that a node labeled 𝜂 in a TDG can be connected
+to other nodes labeled 𝜂′ via arcs whose labels are specified by 𝜃. These productions are mined
+from the proof corpus based on the following observations:
+(1) If a certain tactic never occurs in the proof corpus, it also cannot appear in any learned tactic.
+(2) If there is no dependency between a pair of tactics in the corpus, there is no point in learning a
+tactic that involves a spurious dependency between them.
+(3) If there exists a dependency between a pair of tactics in a proof 𝜋 in the corpus, then the tactic
+TDG should either not include that dependency or, else, it should include all the input-output
+dependencies — otherwise, we cannot find a collapsible isomorphic embedding.
+Based on these ideas, Figure 13 presents the graph grammar learning procedure as a single
+inference rule deriving a judgment of the form: G ⊢ 𝜂 → ( 𝜂′, 𝜃) The productions 𝑅 used in the
+LearnTactic algorithm include the set of all rewrite rules 𝑟 such that G ⊢ 𝑟 according to Figure 13.
+Worklist Initialization. Next, we consider the InitWorklist procedure presented in Figure 14.
+The idea behind this procedure is very simple: It constructs a set of single node TDG’s based on the
+non-terminals in graph grammar 𝑅. Then, for each such single node TDG, it computes the tactic’s
+embedding vector by going over each proof in the corpus. Hence, the worklist is initialized to tactic
+candidates that consist of single node TDG’s and their corresponding embedding vector.
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 16 =====
+343:16 Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig
+1: procedure InitWorklist(𝑅, Π)
+input: Graph grammar 𝑅, proof corpus Π
+output: A worklist of tactic candidates W
+2: 𝑆 = {𝜂 | ( 𝜂  (𝜂′, 𝐸)) ∈ 𝑅}; W ← ∅
+3: for all 𝜂 ∈ 𝑆 do
+4: 𝐺 = ({𝑣 (𝜂)}, ∅)
+5: Λ ← [ 𝜋 ↦→ ⊥ | 𝜋 ∈ Π]
+6: for all 𝜋 ∈ Π do
+7: Λ[𝜋] ← GetWitness(𝐺, TDG(𝜋))
+8: W.enqueue((𝐺, Λ))
+9: return W
+Fig. 14. The InitWorklist procedure for constru-
+cting the initial worklist used in LearnTactic.
+1: procedure Expand(Ψ, 𝑅, Π)
+input: A tactic candidate Ψ = (𝐺, Λ), graph
+grammar 𝑅, corpus Π
+output: A new set of tactic candidates
+2: Θ ← ∅
+3: for all 𝜂  (𝜂′, 𝜃) ∈ 𝑅 do
+4: for all 𝑣 ∈ FindNodes(𝐺, 𝜂) do
+5: 𝑣 ′ ← Fresh(𝜂′)
+6: Θ ← Θ ∪ Apply(Ψ, 𝑣, 𝑣′, 𝜃, Π)
+7: for all 𝑣𝑖 ∈ FindNodes(𝐺, 𝜂′) do
+8: Θ ← Θ ∪ Apply(Ψ, 𝑣, 𝑣𝑖, 𝜃, Π)
+9: return Θ
+Fig. 15. Procedure for expanding a given tactic
+candidate Ψ using graph grammar 𝑅.
+Generating New Tactic Candidates. Recall that the LearnTactic procedure generates new tactic
+candidates by calling the Expand procedure, which is presented in Figure 15. This algorithm takes
+as input an existing tactic candidate Ψ = (𝐺, Λ) and the learned graph grammar 𝑅 and produces a
+new set Θ of tactic candidates, where eachΨ𝑖 ∈ Θ is an expansion ofΨ. Specifically, letΨ𝑖 = (𝐺𝑖, Λ𝑖 )
+be one of the new tactic candidates produced by Expand. Here, every 𝐺𝑖 is a strict supergraph of 𝐺
+and always contains additional edges that are not in 𝐺. Additionally, some of these 𝐺𝑖’s may also
+contain a single additional node that is not in 𝐺.
+As shown in Figure 15, the Expand procedure considers each production 𝜂 → ( 𝜂′, 𝜃) ∈ 𝑅 (line
+3) and locates all nodes 𝑣 ∈ 𝐺 with 𝜂. Then, at line 6, it calls Apply (discussed later) to produce a
+new tactic candidate 𝐺 ′ that includes a fresh node 𝑣 ′ labeled 𝜂′, along with arcs labeled (𝛼, 𝛽 ) ∈ 𝜃
+between 𝑣 and 𝑣 ′. Additionally, since there may be existing nodes labeled 𝜂′ in 𝐺, the inner loop at
+lines 7–8 also adds additional edges from 𝑣 to each existing node 𝑣𝑖 labeled 𝜂′.
+We now also briefly explain the auxiliary Apply procedure defined in Algorithm 16. Given a
+tactic candidate Ψ = (𝐺, Λ) where 𝐺 contains a node 𝑣, Apply first constructs a new TDG 𝐺 ′ that
+includes a (possibly new) node 𝑣 ′ as well as edges between 𝑣 and 𝑣 ′ with labels 𝜃. However, since a
+tactic candidate also contains the embedding vector for the tactic, the loop in lines 7–10 constructs
+a new embedding vector for 𝐺 ′ by extending the existing witness functions in Λ. Finally, if the
+frequency of the resulting tactic candidate is less than two, this means that the new tactic candidate
+(or any of its future expansions) are not useful for compressing the proof corpus; hence, Apply
+returns the new tactic candidate Ψ′ only if 𭟋(Ψ′, Π) is at least 2.
+Pruning Non-Optimal Tactic Candidates. Finally, we consider the UpperBound procedure,
+presented in Figure 17, for deriving an upper bound on the effectiveness of a given tactic candidate
+Ψ on compressing the size of the proof corpus Π. The idea behind UpperBound is fairly straight-
+forward: For every embedding of 𝐺 in a proof script 𝜋, we compute the maximum extension of 𝐺
+that can still be embedded in 𝜋:
+Definition 6.7. (Maximum extension) The maximum extension of𝐺 in 𝐺 ′ is a graph𝐺𝑒 with the
+following properties: (1) 𝐺 is a subgraph of 𝐺𝑒; (2) 𝐺𝑒 is a subgraph of 𝐺 ′; (3) root(𝐺𝑒 ) = root(𝐺);
+and (4) For any other graph 𝐺 ′
+𝑒 satisfying (1) (2) and (3), we have size(𝐺 ′
+𝑒 ) ≤ size(𝐺𝑒 ).
+The idea is that, by summing up the sizes of all these extensions across all embeddings into the
+proof corpus, we can obtain an upper bound E (Ψ′, Π) for any Ψ′ that is an extension of Ψ. This is
+precisely what the UpperBound procedure in Figure 17 computes.
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 17 =====
+Automated Discovery of Tactic Libraries for Interactive Theorem Proving 343:17
+1: procedure Apply(Ψ, 𝑣, 𝑣′, 𝜃, Π)
+input: A tactic candidate Ψ = (𝐺 = (𝑉 , 𝐸), Λ),
+nodes 𝑣, 𝑣 ′, edge labels 𝜃, and proof corpus Π
+output: Empty set or singleton tactic candi-
+date
+2: 𝑉 ′ ← ( 𝑉 ∪ {𝑣 ′})
+3: 𝐸′ ← { 𝐸 ∪ {( 𝑣, 𝑣 ′, 𝛼, 𝛽) | ( 𝛼, 𝛽 ) ∈ 𝜃 })
+4: 𝐺 ′ ← ( 𝑉 ′, 𝐸′)
+5: Λ′ ← [ 𝜋 ↦→ ∅ | 𝜋 ∈ Dom(Λ)] ;
+6: Ψ′ ← ( 𝐺 ′, Λ′)
+7: for all 𝜋 ∈ Dom(Λ) do
+8: for all 𝑓 ∈ Λ[𝜋] do
+9: 𝐹 ← Extend(𝑓 , 𝐺′, TDG(𝜋))
+10: Λ′ [𝜋] ← Λ′ [𝜋] ∪ 𝐹
+11: if 𭟋(Ψ′, Π) ≥ 2 then return {Ψ′}
+12: else return ∅
+Fig. 16. Procedure for applying a production from
+the graph grammar on nodes 𝑣, 𝑣 ′.
+1: procedure UpperBound(Ψ, Π)
+input: A tactic candidate Ψ = (𝐺, Λ) and a
+proof corpus Π
+output: Upper bound on the effectiveness of
+Ψ
+2: ub ← 0
+3: for all 𝜋 ∈ Dom(Λ) do
+4: for all 𝑓 ∈ Λ[𝜋] do
+5: 𝐺 ′ ← ApplyWitness(𝐺, 𝑓 )
+6: 𝐺𝑒 ← MaxExtend(𝐺 ′, TDG(𝜋))
+7: ub ← ub + size(𝐺𝑒 ) − 1
+8: return ub
+Fig. 17. Computes upper bound on the compres-
+sion power of any extension of Ψ. ApplyWitness
+applies function 𝑓 to 𝐺 to obtain a graph 𝐺 ′. Max-
+Extend(𝐺, 𝐺′) finds a graph 𝐺𝑒 such that (1) 𝐺𝑒
+is subgraph of 𝑇 𝐷𝐺(𝜋) and supergraph of 𝐺 ′, (2)
+root(𝐺𝑒 ) = root(𝐺 ′) and (3) 𝐺𝑒 has maximum size
+among all graphs that satisfy (1) and (2).
+Tactic Library Synthesis. Finally, to generate a library of tactics, our algorithm synthesizes a
+single tactic by calling LearnTactic, then refactors the corpus using this tactic, and repeats this
+process until no more tactics can be learned.
+Discussion: Learning with Other Objectives. While our algorithm follows standard practice in
+optimizing compression power [8, 10, 18], it naturally generalizes to other objectives. For example,
+one can consider a broader optimization function of the form 𝛼 × CP(𝜏, Π) − 𝛽 × 𝐹 (𝜏), where 𝐹
+penalizes tactics that do not satisfy certain syntactic or semantic criteria, such as requiring too
+many arguments or being too narrowly applicable. Adapting our method to alternative objectives
+requires modifying two aspects of the learning algorithm: (1) the objective function itself, captured
+by E , and (2) the UpperBound procedure, which estimates an upper bound on the objective value.
+For instance, for an objective of the form𝛼 × CP(𝜏, Π) − 𝛽 × 𝐹 (𝜏), a straightforward implementation
+of UpperBound could reuse our existing technique for over-approximating compression power
+while conservatively assuming that the penalty term is zero.
+7 Implementation
+We have implemented the proposed algorithm as a new tool called TacMiner, which consists of
+about 5000 lines of Java code and utilizes the external Coq-SerAPI library [3] to parse proof scripts
+and extract any information necessary for constructing TDGs. The current version of TacMiner
+only supports Ltac [15], as it remains the dominant tactic language in existing Rocq developments.
+Handling Overlapping Embeddings. In the technical presentation, we assume that, if there are
+multiple isomorphic collapsible embeddings of a tactic into a proof, then they are non-overlapping;
+however, our implementation does not make this assumption. In particular, when computing an
+upper bound on effectiveness during the tactic discovery process, we assume that all embeddings
+can be used for refactoring, giving a conservative upper bound on the effectiveness of a given tactic
+candidate. Similarly, when computing the actual effectiveness of a tactic, we perform backtracking
+search to find a disjoint subset of embeddings that maximizes the effectiveness score.
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 18 =====
+343:18 Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig
+Converting TDGs to Proof Scripts. Since our approach refactors a proof at the TDG level, we
+need to convert it back to a valid Rocq proof script. As discussed in Section 4, we can do this by
+performing a topological sort of the TDG. However, if a tactic produces multiple sub-goals as its
+output, we need to ensure that each sub-goal is processed as a separate branch. Our algorithm for
+converting TDGs to proof scripts performs additional analysis to keep track of this information
+and ensures that tactics that are used for discharging the same sub-goal appear in the same branch,
+subject to the topological sorting constraints within that branch.
+Supported Tactics. Our method places no restrictions on the tactics used in the input proof
+scripts. Any tactic that can be parsed using SerAPI, including advanced tactics likematch goal and
+eapply, as well as user-defined custom tactics, is supported. Constructs that bundle combinators
+(e.g., try, first, repeat) with tactics are treated an atomic tactics, whereas tactics connected by
+the sequencing operator ; are explicitly decomposed into their individual invocations. There are,
+however, restrictions on what our system can learn. We do not synthesize tactics whose control
+flow depends on inspecting the current proof state (e.g., match goal )3, because a TDG records
+only the executed trace and omits unexecuted branches. Similarly, while our approach can learn
+tactics involving existential variables (evars), it does so only when their effects remain localized
+within the proof states that arise from their instantiation.
+Table 2. Summary of Benchmarks. “Total size” reports total number of pre-defined tactic applications within
+the domain, and “Avg. size / proof” reports average proof size in terms of the number of tactic applications.
+Domain Topic Description # of Proof Total size Avg size / proof
+IndPred Inductive Predicates 61 620 10
+CoqArt SearchTree Search Trees 48 781 16
+Reflection Proof by Reflection 33 668 20
+Hoare Hoare logic 65 1479 23
+Program Separation Heap properties 58 592 10
+Logics Seplog Separation logic 70 1111 16
+CSL Concurrent separation logic 47 1282 27
+RegAlloc Register allocation with validation 31 467 15
+Comp- LiveRange Proofs for live ranges computation 32 903 28
+Cert Needness Abstract domain for needness analysis 103 1759 17
+RTLSpec Abstract specification for RTL generation 55 1413 26
+NMake Big natural numbers 105 1465 14
+BigNums ZMake Big integers 43 801 19
+QMake Big rational numbers 68 1392 20
+8 Evaluation
+We now describe our experimental evaluation that is designed to answer the following questions:
+• RQ1: How effective is our proposed technique in learning tactics compared to a prior ap-
+proach [41] that learns tactics using anti-unification?
+• RQ2: How useful are the learned tactics in terms of compression rate?
+• RQ3: Can our learned tactics help with proof automation?
+• RQ4: How data efficient is our learning algorithm?
+• RQ5: What impact do the key ingredients of our learning algorithm have on running time?
+3In contrast, tactics such as intros, simpl, or auto are supported: although their effects depend on the proof state, their
+execution does not require branching on it.
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 19 =====
+Automated Discovery of Tactic Libraries for Interactive Theorem Proving 343:19
+8.1 Experimental Setup
+Benchmarks. To evaluate our approach, we collected 918 proofs across four different sources:
+a textbook called “Interactive Theorem Proving and Program Development”[5] (also known as
+CoqArt[12]), the formally verified C compiler CompCert [35], the BigNums arbitrary-precision
+arithmetic library [52], and formalizations of various program logics [34]. For each of these sources,
+we choose these sub-domains that satisfy certain criteria, such as containing a threshold number
+of proofs (≥ 30 across all sources). Table 2 provides a summary of our experimental benchmarks,
+including a description of the sub-domain that the proofs pertain to and the number of proofs in
+each sub-domain. The last two columns in the table show the total number of tactic applications
+in each domain and the average number of tactics per proof. Overall, these benchmarks span a
+wide spectrum of proof domains, ranging from introductory proofs in CoqArt to expert-level devel-
+opments in large-scale systems like CompCert. Furthermore, they include a mix of programming
+languages (PL)-specific benchmarks—such as those involving program logics—and formalizations
+with broader mathematical utility, such as those for infinite-precision arithmetic.
+Baseline. Because no prior work exists on tactic library learning for Rocq proofs, we will address
+our first two research questions and compare our approach against a baseline by adapting the
+closest relevant prior work: tactic discovery via anti-unification, proposed in Peano, a system
+designed to automate K12 math proofs. In particular, Peano represents proofs as sequences of
+Table 3. Results for evaluating the effectiveness of the tactic learning algorithm
+Topic Tool # Tactics Avg Tactic Max Tactic Tactic Usage
+Learned Size Size Count
+CoqArt
+IndPred TacMiner 31 2.8 14 83
+Peano 16 2 2 48
+SearchTree TacMiner 54 3.4 17 161
+Peano 20 2.4 6 31
+Reflection TacMiner 38 3.3 11 100
+Peano 20 2.6 9 62
+Program Logics
+Hoare TacMiner 87 3.2 15 231
+Peano 18 2.2 4 55
+Separation TacMiner 36 3.1 8 93
+Peano 26 2.5 7 68
+Seplog TacMiner 69 3.4 13 188
+Peano 16 2.3 4 56
+CSL TacMiner 82 3.6 19 214
+Peano 14 2.1 3 44
+CompCert
+RegAlloc TacMiner 18 8.8 34 50
+Peano 8 7 18 13
+LiveRange TacMiner 61 3.8 16 162
+Peano 17 2.2 5 42
+AbsDomain TacMiner 100 4.3 23 243
+Peano 39 2.1 3 135
+RTLSpec TacMiner 93 3.4 13 260
+Peano 25 2 4 58
+BigNums
+NMake TacMiner 91 2.9 9 263
+Peano 29 2.3 5 84
+ZMake TacMiner 56 4.8 19 132
+Peano 23 3.4 10 48
+QMake TacMiner 95 3.6 21 250
+Peano 36 2.2 4 98
+Overall TacMiner 918 3.6 34 2430
+Peano 310 2.4 10 842
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 20 =====
+343:20 Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig
+actions, and, for each pair of subsequences from different proofs, Peano applies anti-unification to
+find the least general generalization between them. If the two sequences invoke the same actions
+but on different inputs, anti-unification identifies the shared structure while introducing variables
+for the differing parts. Similar to our approach,Peano also aims to maximally compress the existing
+proofs.
+Since the implementation of the tactic induction method in Peano does not work on Rocq
+proofs, we re-implemented their technique to extract tactics from a corpus of Rocq proof scripts.
+Towards this goal, we represent Rocq proof scripts as a sequence of tactics (i.e., “actions” inPeano
+terminology) and use the same anti-unification approach to learn custom tactics. However, this
+syntactic approach does not guarantee that an extracted tactic can be successfully used to refactor
+the proof from which it was derived. Hence, given a tactic library learned using this baseline, we
+perform post-processing to discard tactics that cannot be used to re-factor any proof in the corpus.
+Computational Resources All of our experiments are conducted on a machine with an Apple M2
+CPU and 24 GB of physical memory, running on the macOS operating system.
+8.2 Evaluation of Learned Tactics
+To answer our first research question, we use bothTacMinerand Peano to extract tactics from each
+domain. This evaluation, summarized in Table 3, treats the entire proof corpus of each benchmark
+as the training data. The figure provides statistics about the number of tactics learned by each
+technique and quantitative metrics to assess their quality, including average size of learned tactics,
+the maximum size among all learned tactics, and the total number of times the learned tactics can be
+applied in the proof corpus. As shown in this table, our proposed method learns substantially more
+tactics compared to Peano (around 3× more across all benchmarks) and the learned tactics tend to
+be larger on average (1.5×). Furthermore, across all benchmarks, the tactics learned by Peano can
+be applied a total of 842 times, whereas those learned by TacMiner can be used 2430 times. We
+believe these results demonstrate that our proposed TDG abstraction and learning algorithm allow
+for more effective tactic discovery compared to a baseline that extracts tactics from a syntactic
+representation of proofs.
+Results for RQ1: TacMinerextracts around 3× more tactics compared toPeano. Furthermore,
+the tactics learned by TacMiner are both larger and more frequently applicable in the corpus.
+8.3 Effectiveness of the Learned Tactics for Proof Refactoring
+IndPredSearchTreeReflectionHoareSeparationSeplogCSLRegAllocLiveRangeAbsDomainRTLSpecNMakeQMakeZMake
+1
+1.2
+1.4
+1.6
+TacMiner
+Peano
+Compression Rate per Topic
+Peano TacMiner
+Fig. 18. Average compression power per topic. The dotted lines
+denote the total across topics for each tool.
+To answer our second research ques-
+tion, we evaluate how useful the
+learned tactics are in refactoring previ-
+ously unseen proofs. To perform this ex-
+periment, we split the benchmarks into
+two separate training and test sets. We
+use the training set for tactic discovery
+but evaluate the usefulness of learned
+tactics only on the test set. For this
+experiment, we use 65% of the proofs
+for training (selected via an automated
+sampling script), and the remaining 35%
+as the test set. We further evaluate the effectiveness of our approach for different training vs. test
+set ratios in Section 8.5.
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 21 =====
+Automated Discovery of Tactic Libraries for Interactive Theorem Proving 343:21
+The results of this evaluation are presented in Figure 18 where the y-axis shows the compression
+power (Def 5.2) of the learned tactics on the test set. For each category of benchmarks, we show
+the compression power achieved by both TacMiner and Peano. As we can see from this figure,
+TacMiner results in significantly higher compression power compared to Peano in all categories.
+Across all benchmarks, the compression power ofTacMineris 1.35 for TacMinervs 1.1 for Peano—
+this means that, using the tactics learned by TacMiner, the size of the proof corpus can be reduced
+by 26%, whereas the tactics learned by Peano result in a reduction of only 9%. Furthermore, for
+the Hoare logic proofs, TacMiner achieves the maximum compression of 1.6, indicating that the
+learned tactics for this domain are particularly effective at simplifying other proofs in the same
+domain. That is, for this domain, the refactored proofs are approximately 63% of their old size.
+Results for RQ2: Using the tactics learned by TacMiner, the size of the proof corpus can be
+reduced by 26%. In contrast, Peano’s tactics can reduce the corpus size by only 9%.
+8.4 Using Learned Tactics for Proof Automation
+Table 4. Comparison of theorem proving success rates.
+Method Theorems proved
+Copra with built-in tactics 11/50 (22%)
+Copra with Peano tactics 18/50 (36%)
+Copra with TacMiner tactics 30/50 (60%)
+Next, we evaluate whether our learned cus-
+tom tactics can help a proof automation tool.
+To perform this investigation, we modify Co-
+pra [50], a state-of-the-art proof automation
+tool based on Large Language Models (LLMs),
+to leverage our learned tactics. To adapt Co-
+pra to use custom tactics, we modify the
+prompt provided to the LLM for in-context learning [9]. Specifically, for each custom tactic learned
+by TacMiner, we add the tactic definition as Copra’s context as well as one example showing
+a proof state where that tactic was used (after being refactored by TacMiner) along with the
+tactic’s invocation (i.e., its arguments) that took place in the refactored proof. These two pieces of
+information should, in principle, allow Copra to leverage custom tactics. For this experiment, we
+use OpenAI’sgpt-4o-2024-10-06 [27] as the underlying LLM.
+0.2 0.4 0.6 0.8 11
+1.2
+1.4
+% of Training Data
+Average Compression Rate
+Fig. 19. Data efficiency for TacMiner. The
+error bar reflects the standard error.
+To evaluate the utility of learned tactics for down-
+stream proof automation, we selected a set of 50 theorems
+from the same sources listed in Table 2. These theorems
+were chosen based on two criteria. First, they are the-
+orems for which Copra, with a smaller computational
+budget than our official evaluation, was able to make
+partial progress—successfully solving some sub-goals but
+failing to complete the entire proof. This ensures that the
+benchmarks are neither trivial nor intractable, providing
+a meaningful setting for evaluating the added value of tac-
+tic learning. Second, we required that the corresponding
+refactored proof makes use of at least one tactic discov-
+ered by our system, ensuring that the learned tactics are relevant and can plausibly aid automation.
+Together, these criteria yield a benchmark set well-suited for measuring the practical benefits of
+tactic reuse in proof automation workflows.
+The results of this evaluation are presented in Table 4. The vanilla Copra baseline using only
+built-in tactics can prove 11 out of the 50 theorems, resulting in a success rate of 22%. We then
+independently evaluate Copra augmented with learned tactics from Peano and TacMiner on
+the same 50 theorems. Copra supplied with the tactics learned by Peano can prove 7 additional
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 22 =====
+343:22 Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig
+theorems, increasing success rate to 36%. Finally, using the custom tactics learned by our method,
+Copra can prove 19 additional theorems over the baseline, increasing the success rate to60%. These
+results demonstrate that (1) custom tactics can be useful for improving proof automation, and (2)
+tactics learned by our method are more useful for proof automation compared to thePeano baseline.
+Results for RQ3: Using the custom tactics learned by TacMiner, we are able to increase the
+success rate of an LLM-based proof automation tool from 22% to 60%.
+8.5 Data efficiency of proposed tactic learning technique
+The results of this evaluation are presented in Figure 19. As expected, the larger the number of
+training benchmarks, the more effective the learning technique. However, even if we only use 25%
+of the benchmarks for training, TacMinerstill achieves a compression power of around 1.13, which
+is higher than that achieved by Peano with a much larger training set.
+Results for RQ4: While TacMiner benefits from a larger training corpus, it can still achieve
+significant compression on the test set as we decrease the size of the training data.
+8.6 Ablation Studies for Tactic Discovery Algorithm
+To answer our final research question, we present the results of an ablation study in which we
+disable some of the key components of our tactic learning algorithm. In particular, we consider the
+following two ablations of TacMiner:
+• GrammarABL: This ablation performs a limited form of grammar learning.4 In particular, it
+learns graph grammar rules of the form 𝜂 → 𝜂′ instead of 𝜂 → ( 𝜂′, 𝜃), meaning that it does not
+have prior knowledge about the argument dependencies between tactics.
+• PruningABL: This ablation does not use the pruning procedure (UpperBound) from Section 6.2.
+The results of this ablation study are presented in Figures 20 (for Program Logics), 21 (for Com-
+pCert), 22 (for CoqArt), and 23 (for BigNums). Here, the 𝑥-axis shows the number of total tactics
+learned, and the 𝑦-axis shows the cumulative learning time in seconds. Note that the 𝑦-axis uses
+log scale. As we can see from these plots, both graph grammar learning and pruning via upper
+bound estimation have a huge impact on the running time of the tactic discovery algorithm. While
+TacMiner can terminate on the entire corpus in about 13 minutes, both of the ablations fail to
+terminate within a 30-minute time limit.
+Results for RQ5: Both of our algorithmic optimizations (namely, grammar learning and
+pruning method) significantly reduce the learning algorithm’s running time.
+4We also tried switching off grammar learning entirely, but since it performs extremely poorly, we only report the results of
+a limited form of grammar learning.
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 23 =====
+Automated Discovery of Tactic Libraries for Interactive Theorem Proving 343:23
+0 50 100 150 200 250
+10−1
+101
+103
+Number tactics learned
+Cumulative Time (s)
+PruningABL GrammarABL Ours
+Fig. 20. Learning curve for ProgramLogic.
+0 50 100 150 200 250
+10−1
+101
+103
+Number tactics learned
+PruningABL GrammarABL Ours
+Fig. 21. Learning curve for CompCert.
+0 20 40 60 80 100 120
+10−1
+101
+103
+Number tactics learned
+Cumulative Time (s)
+PruningABL GrammarABL Ours
+Fig. 22. Learning curve for CoqArt.
+0 50 100 150 200 250
+10−1
+101
+103
+Number tactics learned
+Cumulative Time (s)
+PruningABL GrammarABL Ours
+Fig. 23. Learning curve for BigNums.
+9 Related Work
+In this section, we survey work that is most closely related to our proposed tactic discovery method.
+Tactic Learning. Previous work, particularly Peano [41], has focused on learning tactic libraries
+through anti-unification [40]. This method is syntactic in nature: proofs are modeled as sequences
+of operations, and new tactics are derived when repeated sub-sequences are identified across
+multiple proofs. While effective in identifying recurring patterns, this approach is limited by its
+inability to capture deeper semantic relationships between proof steps or perform meaningful proof
+refactoring. Additionally, Peano operates within a restricted, custom tactic language.
+Proof Automation Through Tactic Prediction. A significant body of recent work has used
+neural models for tactic prediction: given the current proof state, predict a tactic invocation to make
+progress in the proof [ 4, 6, 7, 13, 26, 45, 51, 55]. These models can either fully automate proofs
+or collaborate with human users [48]. Typically, the underlying prediction models are trained on
+human-written proof steps in the language of interest, and then used to guide a search algorithm
+interacting with the theorem proving environment. More recent works also explore using LLMs
+for proof automation [24, 37, 50], finding that broad pre-training also makes current LLMs capable
+of predicting tactics. Our work complements these methods by alleviating the burden on the tactic
+predictor: since proofs using higher-level tactics are shorter, they can be generated with fewer calls
+to the predictor. Systems based on LLMs that are capable of in-context learning, such as Copra [50],
+make this integration particularly convenient, since they can attempt to use custom tactics without
+having prior knowledge about them, as long as they are given to the LLM in their context window.
+Library Learning. Library learning in code-related domains aims to automatically discover reusable
+components in both programs and formal proofs. In the context of code reuse, researchers have
+explored various methods for code library learning, including anti-unification techniques [17, 28],
+program synthesis algorithms [8, 18], and e-graphs [10]. For theorem proving, library learning has
+primarily focused on extracting reusable lemmas. Kaliszyk and Urban [29] introduced a method for
+automatically extracting lemmas from the Mizar system to assist in proving additional theorems.
+This idea was expanded by REFACTOR [59], which applied similar lemma extraction techniques
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 24 =====
+343:24 Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig
+to the Metamath system. More recently, Xin et al. [ 56] integrated lemma proposals from large
+language models (LLMs) into neural theorem proving for the Lean prover. Our work on tactic
+learning provides a complementary addition to these approaches, as tactics represent imperative,
+untyped proof construction steps rather than specific mathematical facts. While lemma learning
+focuses on identifying reusable truths, tactic learning captures and generalizes common proof
+strategies, allowing proofs to be written more concisely and at a higher level of abstraction.
+Semantic Code Refactoring Several approaches have been developed for semantic code refac-
+toring across various domains. Revamp [39] focuses on refactoring Abstract Data Types (ADTs)
+using relational constraints. In other areas, researchers have explored different techniques: using
+program invariants to detect refactoring candidates [30], employing type constraints to refactor
+class hierarchies [49, 53], and applying program analysis techniques to refactor Java generics [2].
+Additionally, Migrator [54] addresses the refactoring of database programs in response to schema
+updates. However, these approaches target code refactoring rather than proof refactoring.
+Guided Enumerative Synthesis. Our tactic candidate enumeration procedure shares similarities
+with guided enumerative synthesis techniques from program synthesis literature [8, 11, 18, 23, 33,
+42, 46, 58]. While most of these works aim to synthesize complete programs based on input/output
+examples or other specifications, Stitch [8] also employs a corpus-guided top-down approach to
+learn library abstractions for programs. However, as noted in our introduction, Stitch primarily
+focuses on generalizing concrete expressions to lambda abstractions. In contrast, our work empha-
+sizes leveraging the semantics of tactic execution to discover new usable patterns.
+Graph-Based Program Abstractions. Tactic Dependence Graphs (TDGs) are inspired by graph-
+based program abstractions [1, 22, 31, 44, 47], such as control-flow and data-flow graphs, commonly
+used in program analysis. Broadly, such abstractions represent either the program’s control flow
+(e.g., call graph) or dependencies between data (e.g., points-to graph) and are widely employed for
+tasks like optimization and security analysis (e.g., malware detection, code clone identification [19,
+20, 25, 36, 43, 60]). However, TDGs differ in their purpose and design, focusing on logical proof
+dependencies between tactics rather than control or data dependencies. Notably, TDGs abstract
+away irrelevant syntactic differences between proofs (e.g., subgoal naming or tactic order) and
+concentrate on the semantic relationships between tactic applications.
+10 Discussion
+The proof refactoring and tactic discovery framework presented in this paper enables multiple
+applications in interactive theorem proving. In this section, we discuss three possible use cases of
+our approach in the overall proof engineering workflow.
+Improving Proof Automation. By encapsulating recurring proof patterns into higher-level tactics,
+our approach helps automated tools operate at a more abstract level. Instead of repeatedly generating
+low-level proof steps, proof automation tools can leverage learned tactics as higher-level building
+blocks. This strategy can improve scalability, since the search space at a higher level of abstraction
+is smaller. This approach also facilitates a form of curriculum learning, where newly discovered
+tactics serve as building blocks for more advanced proofs. As shown in our evaluation in Section 8.4,
+the tactics learned by TacMiner already significantly improve the success rate of a state-of-the-art
+proof automation tool. Notably, this improvement is observed even though current automation
+tools are not explicitly trained to exploit custom tactics. As proof automation methods evolve to
+take better advantage of custom tactics, we expect these gains to become even more pronounced.
+Interactive Tactic Suggestion. Our method can also assist proof engineers by suggesting potential
+tactics, highlighting repeated patterns in their proofs that might otherwise go unnoticed. In this
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 25 =====
+Automated Discovery of Tactic Libraries for Interactive Theorem Proving 343:25
+interactive mode, we expect users to take inspiration from the suggested tactics while refining
+them to fit their domain expertise and personal style. For instance, if a learned tactic appears too
+general—such as requiring an excessive number of arguments—users can specialize it with concrete
+parameters to make it more practical. Likewise, multiple tactics proposed by TacMiner can be
+merged into a single tactic that dynamically selects which one to apply based on the structure
+of the proof goal. Rather than prescribing a fixed way to restructure proofs, the system provides
+flexible recommendations that users can adapt as needed.
+Proof Refactoring. A third use case of our tool is automatically or interactively refactoring existing
+proofs, particularly in large projects that require long-term maintenance. As definitions change or
+new lemmas are introduced, proof engineers often need to define new tactics and restructure existing
+proofs to incorporate them. However, manually refactoring proofs in this way is labor-intensive.
+Our method simplifies this process by identifying where a given tactic—whether user-defined or
+adapted from a tactic discovered by TacMiner —can replace existing sequences of proof steps.
+11 Conclusion
+We introduced a new approach to tactic discovery using Tactic Dependency Graphs (TDGs),
+which abstract away syntactic variations while capturing the logical dependencies between tactic
+applications. TDGs facilitate both the learning of custom tactics and the refactoring of existing proofs
+into more concise, modular forms. We implemented this method in a tool called TacMiner and
+evaluated it on several domains, including various program logics, arbitrary-precision arithmetic,
+and compiler transformations. We also compared our approach against an anti-unification-based
+tactic discovery method from prior work (Peano) and demonstrated the advantages of our approach
+in terms of the number and quality of the learned tactics: TacMiner learns around 3× as many
+tactics compared to Peano and achieves an compression rate of1.35 on the test set, reducing the size
+of the corpus by 26%. We also showed that the tactics learned byTacMinerare useful for improving
+proof automation: When Copra, a state-of-the-art proof automation tool, is supplied with the
+custom tactics learned by TacMiner, its success rate yields a relative increase of 172%. Overall,
+our work shows that tactic discovery provides a promising avenue for both proof refactoring and
+automation.
+Data-Availability Statement
+Our artifact, along with the benchmark suite used for evaluation, is available on Zenodo [57].
+Acknowledgments
+We thank our anonymous reviewers for their helpful feedback and support. This work was conducted
+in a research group supported by the National Science Foundation under Grant No. 1762299, Grant
+No. 1918889, Grant No. 1908304, Grant No. 1901376, Grant No. 2120696, Grant No. 2210831, and
+Grant No. 2319471.
+References
+[1] Frances E. Allen. 1970. Control flow analysis. In Proceedings of a Symposium on Compiler Optimization (Urbana-
+Champaign, Illinois). Association for Computing Machinery, New York, NY, USA, 1–19. https://doi.org/10.1145/800028.
+808479
+[2] John Altidor and Yannis Smaragdakis. 2014. Refactoring Java generics by inferring wildcards, in practice. InProceedings
+of the 2014 ACM International Conference on Object Oriented Programming Systems Languages &amp; Applications
+(Portland, Oregon, USA) (OOPSLA ’14). Association for Computing Machinery, New York, NY, USA, 271–290. https:
+//doi.org/10.1145/2660193.2660203
+[3] Emilio Jesús Gallego Arias. [n. d.]. Coq SerAPI Library. https://github.com/ejgallego/coq-serapi
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 26 =====
+343:26 Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig
+[4] Kshitij Bansal, Sarah Loos, Markus Rabe, Christian Szegedy, and Stewart Wilcox. 2019. HOList: An Environment for
+Machine Learning of Higher Order Logic Theorem Proving. In Proceedings of the 36th International Conference on
+Machine Learning (Proceedings of Machine Learning Research, Vol. 97) , Kamalika Chaudhuri and Ruslan Salakhutdinov
+(Eds.). PMLR, 454–463. https://proceedings.mlr.press/v97/bansal19a.html
+[5] Yves Bertot and Pierre Castéran. 2004. Interactive Theorem Proving and Program Development: Coq’Art: The Calculus of
+Inductive Constructions. Springer, Berlin, Heidelberg.
+[6] Lasse Blaauwbroek and Herman Urban, Josefand Geuvers. 2020. The Tactician. In Intelligent Computer Mathematics,
+Christoph Benzmüller and Bruce Miller (Eds.). Springer International Publishing, Cham, 271–277.
+[7] Lasse Blaauwbroek, Josef Urban, and Herman Geuvers. 2020. Tactic Learning and Proving for the Coq Proof Assistant.
+In LPAR23. LPAR-23: 23rd International Conference on Logic for Programming, Artificial Intelligence and Reasoning (EPiC
+Series in Computing, Vol. 73), Elvira Albert and Laura Kovacs (Eds.). EasyChair, 138–150. https://doi.org/10.29007/wg1q
+[8] Matthew Bowers, Theo X. Olausson, Lionel Wong, Gabriel Grand, Joshua B. Tenenbaum, Kevin Ellis, and Armando
+Solar-Lezama. 2023. Top-Down Synthesis for Library Learning. Proc. ACM Program. Lang. 7, POPL, Article 41 (jan
+2023), 32 pages. https://doi.org/10.1145/3571234
+[9] Tom B Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared Kaplan, Prafulla Dhariwal, Arvind Neelakantan,
+Pranav Shyam, Girish Sastry, Amanda Askell, et al . 2020. Language models are few-shot learners. In Advances in
+Neural Information Processing Systems , Vol. 33. 1877–1901.
+[10] David Cao, Rose Kunkel, Chandrakana Nandi, Max Willsey, Zachary Tatlock, and Nadia Polikarpova. 2023. babble:
+Learning Better Abstractions with E-Graphs and Anti-unification. Proc. ACM Program. Lang. 7, POPL, Article 14 (jan
+2023), 29 pages. https://doi.org/10.1145/3571207
+[11] Qiaochu Chen, Xinyu Wang, Xi Ye, Greg Durrett, and Isil Dillig. 2020. Multi-modal synthesis of regular expressions. In
+Proceedings of the 41st ACM SIGPLAN Conference on Programming Language Design and Implementation (London, UK)
+(PLDI 2020). Association for Computing Machinery, New York, NY, USA, 487–502. https://doi.org/10.1145/3385412.
+3385988
+[12] Coq Community. 2024. Coq-Art: Practical Foundations for Programming with Dependent Types. https://github.com/coq-
+community/coq-art. Accessed: 2024-11-04.
+[13] Łukasz Czajka and Cezary Kaliszyk. 2018. Hammer for Coq: Automation for Dependent Type Theory. Journal of
+Automated Reasoning 61, 1 (2018), 423–453. https://doi.org/10.1007/s10817-018-9458-4
+[14] Ana de Almeida Borges, Annalí Casanueva Artís, Jean-Rémy Falleri, Emilio Jesús Gallego Arias, Érik Martin-Dorel,
+Karl Palmskog, Alexander Serebrenik, and Théo Zimmermann. 2023. Lessons for Interactive Theorem Proving
+Researchers from a Survey of Coq Users. In 14th International Conference on Interactive Theorem Proving (ITP 2023)
+(Leibniz International Proceedings in Informatics (LIPIcs), Vol. 268), Adam Naumowicz and René Thiemann (Eds.). Schloss
+Dagstuhl – Leibniz-Zentrum für Informatik, Dagstuhl, Germany, 12:1–12:18. https://doi.org/10.4230/LIPIcs.ITP.2023.12
+[15] David Delahaye. 2000. A tactic language for the system Coq. In Proceedings of the 7th International Conference on Logic
+for Programming and Automated Reasoning (Reunion Island, France) (LPAR’00). Springer-Verlag, Berlin, Heidelberg,
+85–95.
+[16] Reinhard Diestel. 2024. Graph theory. Springer (print edition); Reinhard Diestel (eBooks).
+[17] Kevin Ellis, Lucas Morales, Mathias Sablé-Meyer, Armando Solar-Lezama, and Josh Tenenbaum. 2018. Learning Libraries
+of Subroutines for Neurally–Guided Bayesian Program Induction. InAdvances in Neural Information Processing Systems,
+S. Bengio, H. Wallach, H. Larochelle, K. Grauman, N. Cesa-Bianchi, and R. Garnett (Eds.), Vol. 31. Curran Associates,
+Inc. https://proceedings.neurips.cc/paper_files/paper/2018/file/7aa685b3b1dc1d6780bf36f7340078c9-Paper.pdf
+[18] Kevin Ellis, Catherine Wong, Maxwell Nye, Mathias Sablé-Meyer, Lucas Morales, Luke Hewitt, Luc Cary, Armando
+Solar-Lezama, and Joshua B. Tenenbaum. 2021. DreamCoder: bootstrapping inductive program synthesis with wake-
+sleep library learning. In Proceedings of the 42nd ACM SIGPLAN International Conference on Programming Language
+Design and Implementation (Virtual, Canada) (PLDI 2021). Association for Computing Machinery, New York, NY, USA,
+835–850. https://doi.org/10.1145/3453483.3454080
+[19] Yu Feng, Saswat Anand, Isil Dillig, and Alex Aiken. 2014. Apposcopy: Semantics-based detection of android malware
+through static analysis. In Proceedings of the 22nd ACM SIGSOFT international symposium on foundations of software
+engineering. 576–587.
+[20] Yu Feng, Osbert Bastani, Ruben Martins, Isil Dillig, and Saswat Anand. 2017. Automated Synthesis of Se-
+mantic Malware Signatures using Maximum Satisfiability. In 24th Annual Network and Distributed System Se-
+curity Symposium, NDSS 2017, San Diego, California, USA, February 26 - March 1, 2017 . The Internet Soci-
+ety. https://www.ndss-symposium.org/ndss2017/ndss-2017-programme/automated-synthesis-semantic-malware-
+signatures-using-maximum-satisfiability/
+[21] Yu Feng, Ruben Martins, Osbert Bastani, and Isil Dillig. 2018. Program synthesis using conflict-driven learning. ACM
+SIGPLAN Notices 53, 4 (2018), 420–435.
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 27 =====
+Automated Discovery of Tactic Libraries for Interactive Theorem Proving 343:27
+[22] Jeanne Ferrante, Karl J Ottenstein, and Joe D Warren. 1987. The program dependence graph and its use in optimization.
+ACM Transactions on Programming Languages and Systems (TOPLAS) 9, 3 (1987), 319–349.
+[23] John K. Feser, Swarat Chaudhuri, and Isil Dillig. 2015. Synthesizing data structure transformations from input-output
+examples. In Proceedings of the 36th ACM SIGPLAN Conference on Programming Language Design and Implementation
+(Portland, OR, USA) (PLDI ’15). Association for Computing Machinery, New York, NY, USA, 229–239. https://doi.org/
+10.1145/2737924.2737977
+[24] Emily First, Markus N. Rabe, Talia Ringer, and Yuriy Brun. 2023. Baldur: Whole-Proof Generation and Repair with
+Large Language Models. In Proceedings of the 31st ACM Joint European Software Engineering Conference and Symposium
+on the Foundations of Software Engineering (San Francisco, CA, USA) (ESEC/FSE 2023). Association for Computing
+Machinery, New York, NY, USA, 1229–1241. https://doi.org/10.1145/3611643.3616243
+[25] Mark Gabel, Lingxiao Jiang, and Zhendong Su. 2008. Scalable detection of semantic clones. In Proceedings of the 30th
+International Conference on Software Engineering (Leipzig, Germany) (ICSE ’08). Association for Computing Machinery,
+New York, NY, USA, 321–330. https://doi.org/10.1145/1368088.1368132
+[26] Daniel Huang, Prafulla Dhariwal, Dawn Song, and Ilya Sutskever. 2019. GamePad: A Learning Environment for Theorem
+Proving. In International Conference on Learning Representations . https://openreview.net/forum?id=r1xwKoR9Y7
+[27] Aaron Hurst, Adam Lerer, Adam P Goucher, Adam Perelman, Aditya Ramesh, Aidan Clark, AJ Ostrow, Akila Welihinda,
+Alan Hayes, Alec Radford, et al. 2024. GPT-4o System Card. arXiv preprint arXiv:2410.21276 (2024).
+[28] Srinivasan Iyer, Alvin Cheung, and Luke Zettlemoyer. 2019. Learning Programmatic Idioms for Scalable Semantic
+Parsing. In Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing and the 9th
+International Joint Conference on Natural Language Processing (EMNLP-IJCNLP) , Kentaro Inui, Jing Jiang, Vincent
+Ng, and Xiaojun Wan (Eds.). Association for Computational Linguistics, Hong Kong, China, 5426–5435. https:
+//doi.org/10.18653/v1/D19-1545
+[29] Cezary Kaliszyk and Josef Urban. 2015. Learning-assisted theorem proving with millions of lemmas. Journal of
+symbolic computation 69 (2015), 109–128.
+[30] Y. Kataoka, M.D. Ernst, W.G. Griswold, and D. Notkin. 2001. Automated support for program refactoring using
+invariants. In Proceedings IEEE International Conference on Software Maintenance. ICSM 2001 . 736–743. https://doi.org/
+10.1109/ICSM.2001.972794
+[31] Gary A. Kildall. 1973. A unified approach to global program optimization. In Proceedings of the 1st Annual ACM
+SIGACT-SIGPLAN Symposium on Principles of Programming Languages (Boston, Massachusetts) (POPL ’73). Association
+for Computing Machinery, New York, NY, USA, 194–206. https://doi.org/10.1145/512927.512945
+[32] Adarsh Kumarappan, Mo Tiwari, Peiyang Song, Robert Joseph George, Chaowei Xiao, and Anima Anandkumar. 2024.
+LeanAgent: Lifelong Learning for Formal Theorem Proving. arXiv:2410.06209 [cs.LG] https://arxiv.org/abs/2410.06209
+[33] Mina Lee, Sunbeom So, and Hakjoo Oh. 2016. Synthesizing regular expressions from examples for introductory
+automata assignments. In Proceedings of the 2016 ACM SIGPLAN International Conference on Generative Programming:
+Concepts and Experiences (Amsterdam, Netherlands) (GPCE 2016). Association for Computing Machinery, New York,
+NY, USA, 70–80. https://doi.org/10.1145/2993236.2993244
+[34] Xavier Leroy. 2021. Companion Coq development for Xavier Leroy’s 2021 lectures on program logics. https://github.
+com/xavierleroy/cdf-program-logics. GitHub repository.
+[35] Xavier Leroy, Sandrine Blazy, Daniel Kästner, Bernhard Schommer, Markus Pister, and Christian Ferdinand. 2016.
+CompCert-a formally verified optimizing compiler. In ERTS 2016: Embedded Real Time Software and Systems, 8th
+European Congress.
+[36] Chao Liu, Chen Chen, Jiawei Han, and Philip S. Yu. 2006. GPLAG: detection of software plagiarism by program
+dependence graph analysis. In Proceedings of the 12th ACM SIGKDD International Conference on Knowledge Discovery
+and Data Mining (Philadelphia, PA, USA) (KDD ’06). Association for Computing Machinery, New York, NY, USA,
+872–881. https://doi.org/10.1145/1150402.1150522
+[37] Minghai Lu, Benjamin Delaware, and Tianyi Zhang. 2024. Proof Automation with Large Language Models. InProceedings
+of the 39th IEEE/ACM International Conference on Automated Software Engineering (Sacramento, CA, USA) (ASE ’24).
+Association for Computing Machinery, New York, NY, USA, 1509–1520. https://doi.org/10.1145/3691620.3695521
+[38] Peter-Michael Osera and Steve Zdancewic. 2015. Type-and-example-directed program synthesis. ACM SIGPLAN
+Notices 50, 6 (2015), 619–630.
+[39] Shankara Pailoor, Yuepeng Wang, and Işıl Dillig. 2024. Semantic Code Refactoring for Abstract Data Types.Proc. ACM
+Program. Lang. 8, POPL, Article 28 (jan 2024), 32 pages. https://doi.org/10.1145/3632870
+[40] Gordon D Plotkin. 1970. A note on inductive generalization. Machine intelligence 5, 1 (1970), 153–163.
+[41] Gabriel Poesia and Noah D. Goodman. 2023. Peano: learning formal mathematical reasoning.Philosophical Transactions
+of the Royal Society A: Mathematical, Physical and Engineering Sciences 381, 2251 (2023), 20220044. https://doi.org/10.
+1098/rsta.2022.0044 arXiv:https://royalsocietypublishing.org/doi/pdf/10.1098/rsta.2022.0044
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 28 =====
+343:28 Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig
+[42] Nadia Polikarpova, Ivan Kuraj, and Armando Solar-Lezama. 2016. Program synthesis from polymorphic refinement
+types. In Proceedings of the 37th ACM SIGPLAN Conference on Programming Language Design and Implementation
+(Santa Barbara, CA, USA) (PLDI ’16). Association for Computing Machinery, New York, NY, USA, 522–538. https:
+//doi.org/10.1145/2908080.2908093
+[43] Varot Premtoon, James Koppel, and Armando Solar-Lezama. 2020. Semantic code search via equational reasoning. In
+Proceedings of the 41st ACM SIGPLAN Conference on Programming Language Design and Implementation (London, UK)
+(PLDI 2020). Association for Computing Machinery, New York, NY, USA, 1066–1082. https://doi.org/10.1145/3385412.
+3386001
+[44] Barbara G Ryder. 1979. Constructing the call graph of a program. IEEE Transactions on Software Engineering 3 (1979),
+216–226.
+[45] Alex Sanchez-Stern, Yousef Alhessi, Lawrence Saul, and Sorin Lerner. 2020. Generating correctness proofs with neural
+networks. Association for Computing Machinery, New York, NY, USA, 1–10. https://doi.org/10.1145/3394450.3397466
+[46] Ameesh Shah, Eric Zhan, Jennifer J. Sun, Abhinav Verma, Yisong Yue, and Swarat Chaudhuri. 2020. Learning
+differentiable programs with admissible neural heuristics. In Proceedings of the 34th International Conference on Neural
+Information Processing Systems (Vancouver, BC, Canada)(NIPS ’20). Curran Associates Inc., Red Hook, NY, USA, Article
+415, 13 pages.
+[47] Marc Shapiro and Susan Horwitz. 1997. Fast and accurate flow-insensitive points-to analysis. In Proceedings of the 24th
+ACM SIGPLAN-SIGACT symposium on Principles of programming languages . 1–14.
+[48] Peiyang Song, Kaiyu Yang, and Anima Anandkumar. 2024. Towards large language models as copilots for theorem
+proving in lean. arXiv preprint arXiv:2404.12534 (2024).
+[49] Friedrich Steimann. 2018. Constraint-Based Refactoring. ACM Trans. Program. Lang. Syst. 40, 1, Article 2 (Jan. 2018),
+40 pages. https://doi.org/10.1145/3156016
+[50] Amitayush Thakur, George Tsoukalas, Yeming Wen, Jimmy Xin, and Swarat Chaudhuri. 2024. An In-Context Learning
+Agent for Formal Theorem-Proving. In First Conference on Language Modeling . https://openreview.net/forum?id=
+V7HRrxXUhN
+[51] Kyle Thompson, Nuno Saavedra, Pedro Carrott, Kevin Fisher, Alex Sanchez-Stern, Yuriy Brun, João F. Ferreira, Sorin
+Lerner, and Emily First. 2025. Rango: Adaptive Retrieval-Augmented Proving for Automated Software Verification.
+In Proceedings of the 47th International Conference on Software Engineering (ICSE) . Ottawa, ON, Canada. https:
+//arxiv.org/abs/2412.14063 To appear.
+[52] Laurent Théry, Benjamin Grégoire, Arnaud Spiwack, Evgeny Makarov, and Pierre Letouzey. 2026. Bignums. https:
+//github.com/coq-community/bignums. GitHub repository.
+[53] Frank Tip, Robert M. Fuhrer, Adam Kieżun, Michael D. Ernst, Ittai Balaban, and Bjorn De Sutter. 2011. Refactoring
+using type constraints. ACM Trans. Program. Lang. Syst. 33, 3, Article 9 (may 2011), 47 pages. https://doi.org/10.1145/
+1961204.1961205
+[54] Yuepeng Wang, James Dong, Rushi Shah, and Isil Dillig. 2019. Synthesizing database programs for schema refactoring.
+In Proceedings of the 40th ACM SIGPLAN Conference on Programming Language Design and Implementation (Phoenix,
+AZ, USA) (PLDI 2019). Association for Computing Machinery, New York, NY, USA, 286–300. https://doi.org/10.1145/
+3314221.3314588
+[55] Daniel Whalen. 2016. Holophrasm: a neural Automated Theorem Prover for higher-order logic. arXiv:1608.02644 [cs.AI]
+https://arxiv.org/abs/1608.02644
+[56] Huajian Xin, Haiming Wang, Chuanyang Zheng, Lin Li, Zhengying Liu, Qingxing Cao, Yinya Huang, Jing Xiong, Han
+Shi, Enze Xie, et al. 2023. Lego-prover: Neural theorem proving with growing libraries. arXiv preprint arXiv:2310.00656
+(2023).
+[57] Yutong Xin. 2025. TacMiner: Automated Discovery of Tactic Libraries for Interactive Theorem Proving . https://doi.org/10.
+5281/zenodo.15761151
+[58] Xi Ye, Qiaochu Chen, Isil Dillig, and Greg Durrett. 2021. Optimal Neural Program Synthesis from Multimodal
+Specifications. In Findings of the Association for Computational Linguistics: EMNLP 2021 , Marie-Francine Moens,
+Xuanjing Huang, Lucia Specia, and Scott Wen-tau Yih (Eds.). Association for Computational Linguistics, Punta Cana,
+Dominican Republic, 1691–1704. https://doi.org/10.18653/v1/2021.findings-emnlp.146
+[59] Jin Peng Zhou, Yuhuai Wu, Qiyang Li, and Roger Grosse. 2024. REFACTOR: Learning to Extract Theorems from Proofs.
+arXiv preprint arXiv:2402.17032 (2024).
+[60] Yue Zou, Bihuan Ban, Yinxing Xue, and Yun Xu. 2021. CCGraph: a PDG-based code clone detector with approximate
+graph matching. In Proceedings of the 35th IEEE/ACM International Conference on Automated Software Engineering
+(Virtual Event, Australia) (ASE ’20). Association for Computing Machinery, New York, NY, USA, 931–942. https:
+//doi.org/10.1145/3324884.3416541
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 29 =====
+Automated Discovery of Tactic Libraries for Interactive Theorem Proving 343:29
+A Proofs
+Theorem 1. Let 𝜋 be a proof of 𝜎 and let 𝐺 be the TDG for 𝜋. Then, for any 𝜋 ′ which is a topological
+ordering of 𝐺,
+(1) 𝜋 ′ ∈ InducedProofs(𝐺),
+(2) 𝜋 ′ is a proof of 𝜎, and
+(3) 𝜋 and 𝜋 ′ are the same size.
+Proof. First, it’s clear that𝐺 is a directed acyclic graph; since 𝜋 is invoked sequentially, edges
+are drawn strictly from outputs of earlier tactics to inputs of later tactics in𝜋. (A cycle would imply
+a back-edge from a later tactic to an earlier tactic, which is not possible.) Hence 𝜋 is a topological
+ordering of 𝐺.
+Now we take the set of all goals produced in 𝜋, Goals(Ð
+𝑡 ∈𝜋 𝑌𝑡 ). Consider some arbitrary goal 𝑔
+in this set:
+Claim 1. Any 𝑔 ∈ Goals(Ð
+𝑡 ∈𝜋 𝑌𝑡 ) is an input of exactly one tactic in 𝜋.
+We show this by proving the two following claims:
+• 𝑔 is an input of at most one tactic in 𝜋. If this were false, we can select the first two tactics
+𝑡𝑖, 𝑡𝑗 ∈ 𝜋 that take in 𝑔 ∈ 𝑋𝑡𝑖 , 𝑋𝑡 𝑗 . When we invoke 𝑡𝑖, 𝑔 is necessarily removed from the proof
+state. Because goals are unique, then 𝑔 cannot be an input of 𝑡 𝑗, so we derive a contradiction.
+• 𝑔 is an input of at least one tactic in 𝜋. If this were false, 𝑔 would remain in the proof state
+permanently, which can be shown inductively. This contradicts the assumption that 𝜋 is a valid
+proof.
+Next, we’ll begin the proof of the main theorem.
+Claim 2. 𝜋 ′ ∈ InducedProofs(𝐺).
+In other words, 𝜋 ′ generates a graph 𝐺 ′ such that 𝐺 = 𝐺 ′.
+(1) The set of vertices in 𝐺 ′ is identical to the set of vertices in 𝐺. This is evident because
+two topological orderings biject, which is standard. That is, matching tactics 𝑡 (𝜂) ∈ 𝜋 and
+𝑡 ′ (𝜂) ∈ 𝜋 ′ map directly to the same node 𝑣 (𝜂) ∈ 𝐺.
+(2) The set of edges in 𝐺 ′ is identical to the set of edges in 𝐺. We show this by showing that the
+inputs and outputs of every matching pair are identical, since each edge(𝑠, 𝑡, 𝛼, 𝛽 ) corresponds
+exactly to a proposition that is an output of 𝑠 and an input of 𝑡. We show that for each 𝑡 ∈ 𝜋
+corresponding to 𝑡 ′ ∈ 𝜋 ′, 𝑋𝑡 = 𝑋𝑡 ′ and 𝑌𝑡 = 𝑌𝑡 ′:
+Because tactics are deterministic, proving this fact amounts to proving that the inputs𝑋𝑡 ′ are
+the same as their counterparts in 𝑋𝑡 in the proof state immediately prior to the invocation of
+𝑡 ′ during the execution of 𝜋 ′. We prove this inductively:
+• The first tactic necessarily has no inputs and thus produces the same outputs. This corre-
+sponds to the Proof. step, which initiates a proof. (For simplicity, we leave this detail out
+of the diagrams in the body of the paper.)
+• For every subsequent tactic 𝑡 ′ = (𝜂, 𝑋𝑡 ′, 𝑌𝑡 ′ ), consider an arbitrary 𝛼 ∈ In(𝜂). Suppose in
+𝑡, 𝛼 selects some proposition 𝑥 ∈ 𝑋𝑡. We show that 𝛼 also selects 𝑥 as an input to 𝑡 ′, e.g.
+𝑥 ∈ 𝑋𝑡 ′.
+First, 𝛼 selects 𝑥 ∈ 𝑋𝑡 implies some edge (𝑠 (𝜂′), 𝑡(𝜂), 𝛽, 𝛼) ∈ 𝐸 where 𝛼, 𝛽 correspond to 𝑥
+in the respective tactic invocations for 𝑡, 𝑠 ∈ 𝜋. (That is, 𝑥 ∈ 𝑋𝑡 and 𝑥 ∈ 𝑌𝑠.)
+𝑠 corresponds to some 𝑠 ′ ∈ 𝜋 ′, and because 𝜋 ′ is topologically sorted, 𝑠 ′ must already be
+processed. Then, by the inductive hypothesis, 𝑌𝑠 = 𝑌𝑠 ′. Therefore, 𝛼 selects 𝑥 ∈ 𝑋𝑡 → 𝑥 ∈
+𝑌𝑠 → 𝑥 ∈ 𝑌𝑠 ′ → 𝑥 was produced before the invocation of 𝑡 ′.
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 30 =====
+343:30 Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig
+– If 𝑥 is a hypothesis, then it is persistent, e.g. it is never removed and doesn’t change.
+– If 𝑥 is a goal, then 𝑡 ′ is the sole tactic which takes 𝑥 as an input. Therefore, 𝑥 cannot be
+removed by an earlier tactic invocation, implying that 𝑥 remains in the proof state until
+𝑡 ′ is invoked.
+Therefore, 𝛼 also selects 𝑥 as an input for 𝑡 ′. Additionally, since all inputs are the same for
+𝑡 and 𝑡 ′, so are their outputs.
+Claim 3. 𝜋 ′ is a proof of 𝜎.
+We have now shown that all tactics take the same inputs and produce the same outputs, which
+also implies that that Goals(Ð
+𝑡 ∈𝜋 𝑌𝑡 ) = Goals(Ð
+𝑡 ′ ∈𝜋 ′ 𝑌𝑡 ′ ).
+Now consider the final proof state 𝜎 ′ after executing 𝜋 ′ on 𝜎. If there are no goals in the state,
+then 𝜋 ′ is a valid proof. If there is a goal 𝑔 in the final state, then 𝑔 ∈ Goals(Ð
+𝑡 ′ ∈𝜋 ′ 𝑌𝑡 ′ ) → 𝑔 ∈
+Goals(Ð
+𝑡 ∈𝜋 𝑌𝑡 ). By our assertion above, 𝑔 is an input of some tactic 𝑠 ∈ 𝜋, so 𝑔 is an input of the
+corresponding tactic 𝑠 ′ ∈ 𝜋 ′. However, this would imply that 𝑠 ′ ∈ 𝜋 ′ comes strictly after the tactic
+sequence 𝜋 ′ by definition of a topological order, which is a contradiction. Thus 𝜋 ′ is a proof of 𝜎.
+Claim 4. 𝜋 and 𝜋 ′ are the same size.
+Our final claim follows trivially from the one-to-one correspondence between tactics in 𝜋 and
+𝜋 ′. □
+Theorem 2. Let 𝜏 be a tactic, and let𝜋 be a proof script representing a proof of𝜎. Then, Refactor(𝜏, 𝜋 )
+yields a proof script 𝜋 ′ that is also a valid proof of 𝜎.
+Proof. We show that the following invariant holds after every iteration of the loop: after every
+iteration, any 𝜋 ′ ∈ ( InducedProofs(𝐺𝑐 )) is a valid proof of 𝜎, and (InducedProofs(𝐺𝑐 )) is nonempty.
+Then the theorem statement follows trivially.
+First, the invariant holds at the start of the loop, where 𝜋 ∈ ( InducedProofs(𝐺𝑐 )), by simple
+application of Theorem 1.
+Now, assume the invariant holds for 𝐺𝑐 at the start of the loop. The existence of some induced
+proof indicates that 𝐺𝑐 is initially acyclic. Similarly, 𝐺 = (𝑉 , 𝐸) is a directed acyclic graph by the
+same reasoning from 1, since 𝜏 can be processed as a list of tactics.
+We show that 𝐺𝑐 remains acyclic after contraction. Assume 𝐺 ′
+𝑐, which is the graph 𝐺𝑐 after
+contraction, is cyclic. Then there are three cases:
+(1) 𝑡 { 𝑣 (𝜏 .𝜂) { 𝑡 for some tactic 𝑡 ∉ 𝑉 . Then there exists some path 𝑡 { 𝑎 and 𝑏 { 𝑡 for
+𝑎, 𝑏 ∈ 𝑉 before contraction; this follows from a standard graph contraction definition. However,
+by (1) of Definition 4.4, then 𝑡 ought to be in 𝑉 , a contradiction.
+(2) 𝑣 (𝜏 .𝜂) → 𝑣 (𝜏 .𝜂), e.g. 𝑣 (𝜏 .𝜂) forms a self loop. Then there exists some edge 𝑎 → 𝑏 for 𝑎, 𝑏 ∈ 𝑉
+before contraction. However, by (2) of Definition 4.4, then(𝑎, 𝑏, _, _) ought to be in𝐸, and should
+therefore have been removed during contraction, making the self-loop impossible.
+(3) 𝑣 (𝜏 .𝜂) is not part of the cycle. This implies the existence of a cycle before contracting𝐺𝑐, which
+is a contradiction.
+Therefore, 𝐺𝑐 remains acyclic after contraction, which means that (InducedProofs(𝐺 ′
+𝑐)) must be
+nonempty. From this we obtain an arbitrary induced proof script 𝜋 ′ = 𝑡0; ...; 𝑡𝑖 ; 𝜏; 𝑡 𝑗 ; ...; 𝑡𝑛 which is
+topologically ordered, of which there must be at least one.
+We compare 𝜋 ′ to the expanded proof script
+𝜋 ′ [𝜏\𝑇 ] = 𝑡0, ..., 𝑡𝑖, 𝑇0, ..., 𝑇𝑁 , 𝑡𝑗, ..., 𝑡𝑛
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 31 =====
+Automated Discovery of Tactic Libraries for Interactive Theorem Proving 343:31
+where 𝜏 = (𝜂, 𝐼, 𝑂, 𝑇). Then 𝜋 ′ is a topological ordering of 𝐺𝑐, since 𝑇 and 𝜋 ′ are both topologically
+ordered, and expanding a (topologically) ordered list with another (topologically) ordered list results
+in a (topologically) ordered list.
+Therefore, subject to formal-to-actual renamings, 𝜋 ′ [𝜏\𝑇 ] is an induced proof of 𝐺𝑐, which holds
+by (1) of Theorem 1.
+By definition, the custom tactic 𝜏 has identical semantics to the sequence 𝑇0; ...;𝑇𝑁 , subject to
+parameter renamings. Therefore, since 𝜋 ′ [𝜏\𝑇 ] is a valid proof of 𝜎 by the loop invariant, 𝜋 ′ is also
+a valid proof of 𝜎. □
+Theorem 3. Let Ψ = (𝐺, Λ) and Ψ′ = (𝐺 ′, Λ′) be two tactic candidates such that 𝐺 is a subgraph
+of 𝐺 ′ and root(𝐺) = root(𝐺 ′). Then, E (Ψ′, Π) ≤ UpperBound(Ψ, Π).
+Proof. Given a TDG 𝐺, a proof 𝜋, and a witness function 𝑓 , let 𝐺 𝑓 denote ApplyWitness(𝐺, 𝑓 ),
+and 𝐺𝑒,𝜋 denote MaxExtension(𝐺 𝑓 , TDG(𝜋)). By the definition E and Algorithm 17 UpperBound,
+the statement to be proven can be rewritten as:
+∑︁
+𝜋 ∈Π
+∑︁
+𝑓 ∈Λ′ [𝜋 ]
+1[IsCollapsible(𝑓 , 𝐺′, TDG(𝜋))]· (Size(𝐺 ′) − 1) ≤
+∑︁
+𝜋 ∈Π
+∑︁
+𝑓 ∈Λ[𝜋 ]
+Size(𝐺𝑒,𝜋 − 1) (1)
+By simplification we can prove (1) by proving (2), which can be further simplified into (3):
+∑︁
+𝑓 ∈Λ′ [𝜋 ]
+(Size(𝐺 ′) − 1) ≤
+∑︁
+𝑓 ∈Λ[𝜋 ]
+(Size(𝐺𝑒,𝜋 ) − 1), ∀𝜋 ∈ Π (2)
+(Size(𝐺 ′) − 1)· |Λ′ [𝜋] | ≤ ( Size(𝐺𝑒,𝜋 ) − 1)· |Λ[𝜋] |, ∀𝜋 ∈ Π (3)
+We prove (3) by proving the following two claims.
+Claim 1. ∀𝜋 ∈ Π, |Λ′ [𝜋] | ≤ | Λ[𝜋] |.
+Let 𝑓 ′ ∈ Λ′ [𝜋] for any 𝜋 ∈ Π. Note that 𝑉𝐺 ⊆ 𝑉𝐺 ′ since 𝐺 is a subgraph of 𝐺 ′, hence 𝑉𝐺 ⊆
+Dom(𝑓 ′). We can construct a function 𝑓 by duplicating the mappings of 𝑓 ′ but only including
+a subset of its domain such that Dom(𝑓 ) = 𝑉𝐺 and 𝑓 (𝑣) = 𝑓 ′ (𝑣), ∀𝑣 ∈ Dom(𝑓 ). Note that 𝑓 is a
+witness function that proves 𝐺 is an isomorphic embedding to TDG(𝜋), hence 𝑓 ∈ Λ[𝜋]. Thus, we
+can conclude that for each 𝑓 ′ ∈ Λ′ [𝜋], we can construct a 𝑓 ∈ Λ[𝜋] that is a witness function from
+𝐺 to TDG(𝜋), which proves the claim.
+Claim 2. ∀𝜋 ∈ Π, Λ′ [𝜋] ≠ ⊥ =⇒ Size(𝐺 ′) ≤ Size(𝐺𝑒,𝜋 ).
+We prove the claim by contradiction. Assume there exists a 𝜋 ∈ Π, such that Λ′ [𝜋] ≠ ⊥ and
+Size(𝐺 ′) > Size(𝐺𝑒,𝜋 ). Let 𝐺 ′
+𝑓 , 𝐺𝑓 denotes the subgraphs of TDG(𝜋) that are isomorphic to 𝐺 ′, 𝐺,
+respectively, obtained by applying any witness function 𝑓 ∈ Λ′ [𝜋] to 𝐺 ′, 𝐺. Note Size(𝐺 ′
+𝑓 ) >
+Size(𝐺𝑒,𝜋 ) by assumption.
+Note that 𝐺 𝑓 is a subgraph of 𝐺 ′
+𝑓 , 𝐺 ′
+𝑓 is a subgraph of TDG(𝜋), and root(𝐺 ′
+𝑓 ) = 𝑓 (root(𝐺 ′)) =
+𝑓 (root(𝐺)) = root(𝐺 𝑓 ). By (4) of definition 6.7, Size(𝐺 ′
+𝑓 ) ≤ Size(𝐺𝑒,𝜋 ), which contradicts to the
+previous conclusion on the last paragraph.
+Combining Claim 1 and Claim 2, we conclude (3) and complete the proof. □
+The above theorem justifies the soundness of the pruning performed at line 8 of theLearnTactic
+algorithm, and the following theorem states the correctness of the overall LearnTactic procedure.
+Theorem 4. Let 𝜏 ∗ be the result of calling LearnTactic on proof corpus Π. Then, we have:
+𝜏 ∗ = arg max
+𝜏
+CP(𝜏, Π)
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 32 =====
+343:32 Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig
+Proof. We approach the proof by contradiction, and we’d like to establish two claims before we
+start the proof:
+Claim 3. Let 𝜏, 𝜋 be any tactic and proof. Let 𝐺 denote TDG(𝜏), and 𝜋 ′ denote Refactor(𝜏, 𝜋 ).
+Size(𝜋 ′) = Size(𝜋) −
+∑︁
+𝑓 ∈Υ(𝐺,TDG(𝜋 ) )
+1[IsCollapsible(𝑓 , 𝐺, TDG(𝜋))]· (Size(𝜏) − 1)
+As shown in Algorithm 10 Refactor, given a tactic 𝜏 and a proof 𝜋, it iteratively finds collapsible
+embeddings of 𝜏 in 𝜋, and contracts 𝜋 by replacing the embedding of 𝜏’s tactic body inTDG(𝜋) by
+𝜏. Therefore, for each aforementioned collapsible embedding, Refactor reduces the size of 𝜋 by
+Size(𝜏) − 1, which concludes Claim 3.
+Claim 4. For any tactics 𝜏1, 𝜏2, and any corpus Π,
+E (Ψ1, Π) ≤ E (Ψ2, Π) =⇒ CP(Ψ1.𝜏, Π) ≤ CP(Ψ2.𝜏, Π).
+We can conclude Claim 4 by proving:
+E (Ψ1, Π) − E (Ψ2, Π) ≤ 0 =⇒ CP(Ψ1.𝜏, Π) − CP(Ψ2.𝜏, Π) ≤ 0 (1)
+We start by rewriting the left-hand-side of the assumption. Let 𝐺1, 𝐺2, 𝐺′ denote the TDG of 𝜏1, 𝜏2,
+and 𝜋, respectively.
+E (Ψ1, Π) − E (Ψ2, Π) =(Size(𝜏1 ) − 1) ·
+∑︁
+𝜋 ∈Π
+∑︁
+𝑓 ∈Υ (𝐺1,𝐺′ )
+1[IsCollapsible(𝑓 , 𝐺1, 𝐺′ ) ] −
+(Size(𝜏2 ) − 1) ·
+∑︁
+𝜋 ∈Π
+∑︁
+𝑓 ∈Υ(𝐺2,𝐺′ )
+1[IsCollapsible(𝑓 , 𝐺2, 𝐺′ ) ]
+=
+∑︁
+𝜋 ∈Π
+
+(Size(𝜏1 ) − 1) ·
+∑︁
+𝑓 ∈Υ (𝐺1,𝐺′ )
+1[IsCollapsible(𝑓 , 𝐺1, 𝐺′ ) ] −
+(Size(𝜏2 ) − 1) ·
+∑︁
+𝑓 ∈Υ(𝐺2,𝐺′ )
+1[IsCollapsible(𝑓 , 𝐺2, 𝐺′ ) ]
+
+Let’s continue rewriting the left-hand-side of the conclusion by usingClaim 3:
+CP(Ψ1.𝜏, Π) − CP(Ψ2.𝜏, Π)
+=
+Í
+𝜋 ∈Π
+Size(𝜋 )
+Í
+𝜋 ′
+1 ∈Π′
+1
+Size(𝜋 ′
+1 ) −
+Í
+𝜋 ∈Π
+Size(𝜋 )
+Í
+𝜋 ′
+2 ∈Π′
+2
+Size(𝜋 ′
+2 )
+=
+Í
+𝜋 ∈Π
+Size(𝜋 )
+Í
+𝜋 ′
+1 ∈Π′
+1
+Size(𝜋1 ) Í
+𝜋 ′
+2 ∈Π′
+2
+Size(𝜋 ′
+2 )
+©­­
+«
+∑︁
+𝜋 ′
+2 ∈Π′
+2
+Size(𝜋 ′
+2 ) −
+∑︁
+𝜋 ′
+1 ∈Π′
+1
+Size(𝜋1 )
+ª®®
+¬
+=
+Í
+𝜋 ∈Π
+Size(𝜋 )
+Í
+𝜋 ′
+1 ∈Π′
+1
+Size(𝜋1 ) Í
+𝜋 ′
+2 ∈Π′
+2
+Size(𝜋 ′
+2 )
+ ∑︁
+𝜋 ∈Π
+
+Size(𝜋 ) −
+∑︁
+𝑓 ∈Υ (𝐺2,𝐺′ )
+1[IsCollapsible(𝑓 , 𝐺2, 𝐺′ ) ] · (Size(𝜏2 ) − 1)
+
+−
+∑︁
+𝜋 ∈Π
+
+Size(𝜋 ) −
+∑︁
+𝑓 ∈Υ (𝐺1,𝐺′ )
+1[IsCollapsible(𝑓 , 𝐺1, 𝐺′ ) ] · (Size(𝜏1 ) − 1)
+!
+=
+Í
+𝜋 ∈Π
+Size(𝜋 )
+Í
+𝜋 ′
+1 ∈Π′
+1
+Size(𝜋1 ) Í
+𝜋 ′
+2 ∈Π′
+2
+Size(𝜋 ′
+2 )
+∑︁
+𝜋 ∈Π
+ ∑︁
+𝑓 ∈Υ (𝐺1,𝐺′ )
+1[IsCollapsible(𝑓 , 𝐺1, 𝐺′ ) ] · (Size(𝜏1 ) − 1) −
+∑︁
+𝑓 ∈Υ (𝐺2,𝐺′ )
+1[IsCollapsible(𝑓 , 𝐺2, 𝐺′ ) ] · (Size(𝜏2 ) − 1)
+!
+=
+Í
+𝜋 ∈Π
+Size(𝜋 )
+Í
+𝜋 ′
+1 ∈Π′
+1
+Size(𝜋1 ) Í
+𝜋 ′
+2 ∈Π′
+2
+Size(𝜋 ′
+2 )
+ 
+E (Ψ1, Π) − E (Ψ2, Π)
+!
+≤ 0
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 33 =====
+Automated Discovery of Tactic Libraries for Interactive Theorem Proving 343:33
+We’ve concludedClaim 4. Now let’s refocus to the statement of the current theorem. LetΨ∗ denote
+the corresponding tactic candidate of 𝜏 ∗. By Claim 4, we can conclude the theorem statement by
+proving:
+Ψ∗ = arg max
+Ψ
+E (Ψ, Π).
+We start our proof by contradiction with assuming there exists a tactic candidate Ψ′, such that
+E (Ψ∗, Π) < E (Ψ′, Π). However, since Ψ′ was not returned by LearnTactic, it must have never
+reached line 9 of LearnTactic, implying that any tactic candidate Ψ′′ expandable to Ψ′ was pruned
+out by UpperBound. Note that Ψ′′.𝐺 is a subgraph of Ψ′.𝐺 as Ψ′′ expands to Ψ. By Theorem 3,
+E (Ψ′, Π) ≤ UpperBound(Ψ′′, Π). Additionally, since Ψ′′ was pruned out, UpperBound(Ψ′′,
+Π) < E (Ψ∗, Π). Therefore, we conclude E (Ψ′, Π) < E (Ψ∗, Π), which yields a contradiction. □
+B Setup of the Peano baseline
+As outlined in Section 8.1, we have re-implemented Peano to support the Rocq environment. In
+this section, we provide a detailed exposition of this re-implementation.
+Proof tokenization. Given a corpus of proofs, each proof is segmented into a sequence of tactics,
+which are analogous to “actions” inPeano terminology. This approach represents each proof as a
+single linear sequence of tactics, implying a sequential dependency structure. However, this linear
+representation may oversimplify the more graph-like dependency structure present in Rocq proofs.
+Learning maximally compressive tactics. In the Peano framework, the maximally compressive
+composite tactic, 𝜏, for a given corpus of proofs, Π, is constructed from the longest consecutive
+common subsequence shared among a subset of proofs, Π′, with argument anti-unification applied
+(detailed in the following subsection). This composite tactic is selected to maximize compression,
+measured by its compression power (Size(𝜏) − 1) · | Π′ |. To identify the optimal tactic 𝜏, we
+exhaustively search for the longest common subsequence between every pair of proofs in the
+corpus, from the results of which we ultimately choose the subsequence that offers the highest
+compression power across the entire corpus.
+Tactic argument anti-unification. During the search for the maximally compressive custom
+composite tactic, we employ argument anti-unification across sequences of tactic tokens. Specifically,
+given two sequences of tactics that share identical tactic names but differ in their list of formal
+arguments, denoted by ®𝐼1 and ®𝐼2, we construct a generalized tactic sequence with the minimally
+sufficient set of input identifiers, ®𝐼. This ®𝐼 is defined such that there exists a valid mapping from
+each identifier 𝑖 in {𝑖 ∈ 𝐼 |∀𝐼 ∈ ®𝐼 } to the corresponding identifiers in both {𝑖 ∈ 𝐼 |∀𝐼1 ∈ ®𝐼1} and
+{𝑖 ∈ 𝐼 |∀𝐼2 ∈ ®𝐼2}. ®𝐼 is known as the least general generalization of ®𝐼1 and ®𝐼2 [41].
+For example, consider the two tactic sequences intros H H0 H1; rewrite H0 in H1 and
+intros H H0 H1; rewrite H in H1 . The resulting generalized tactic, capturing the common
+structure, would be defined as: Ltac H H0 H1 H2 := intros H H0 H1; rewrite H2 in H1.
+C Integration with Copra
+In Section 8.4, we described our experiment measuring the impact of combining our custom tactics
+with Copra, an LLM-based tool for proof automation. We used Copra for this experiment due to
+its flexibility with respect to custom tactics (e.g., tools like CoqHammer cannot leverage them), and
+the fact that it leverages in-context learning. Previous proof automation tools based on machine
+learning require first training a neural network on existing proofs [45]. However, these architectures
+cannot predict tactics that weren’t seen during training, while LLMs can still attempt to use them
+as long as we provide enough information about the new tactics in their context window.
+Our concrete implementation thus had 4 steps:
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 34 =====
+343:34 Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig
+Refactoring: We first refactored the existing proof scripts using the discovered custom tactics. We
+also insert the new tactic definitions immediately before the first lemma that uses that tactic.
+This gives us a set of valid Rocq proof scripts that we know use the new tactics. Moreover,
+we initialize the Copra agent on this refactored script, so that it will be able to invoke the
+custom tactics.
+Indexing available tactics: For each lemma 𝐿 that uses custom tactics, we index offline which
+custom tactics have been declared before the statement of𝐿. These are all the available tactics
+that we must describe to Copra when it tries to prove 𝐿.
+Example extraction: We run the refactored proof script through the Coq SerAPI, and log all of
+the proof states along with the tactic invocations that were observed. From these, we can
+extract usage examples for each of the custom tactics. We save these examples in the index,
+along with what lemma they came from. We found even one example to help significantly:
+given only the tactic definitions, GPT-4o would generally avoid using the new tactics, or use
+them with invalid arguments.
+Prompt hacking: Finally, at test time, when Copra is proving a lemma, we modify the prompt
+construction that takes place in its “DFS Agent” to first (1) look up the current lemma in the
+index, and (2) if there are custom tactics declared before the current lemma, add both the
+tactics’ declarations and one usage example per tactic, taken from a different lemma. This
+gives Copra some indication of when this tactic might be useful.
+We give one representative prompt on the CoqArt benchmark in Figure 24. The prompt starts
+with a common system message explaining how the Copra DFS agent works, which we abbreviate.
+Then, we describe each available tactic along with one usage example for each.
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 35 =====
+Automated Discovery of Tactic Libraries for Interactive Theorem Proving 343:35
+<<system>>
+You are a proficient formal theorem-proving agent in Coq. You can predict the next proof step
+given the current proof state, relevant definitions, and some possible useful lemmas/theorems.
+The proof state is described in the following format:
+1. All the goals are described under `[GOALS]` keyword.
+[...]
+<<user>>
+In your proof, you can use the following custom tactics that were defined for this particular
+domain:
+### Available domain-specific tactics ###
+Tactic definition: Ltac custom2 H0 H1 := intros H0 H1; [assumption |..].
+Real example of this tactic being used in context:
+Goal: forall (n : nat) (_ : lt (Init.Nat.mul 7 5) n), le (Init.Nat.mul 6 6) n
+Action: custom2 n H .
+Tactic definition: Ltac custom0 H0 := apply H0; [assumption |..].
+Real example of this tactic being used in context:
+Goal: Q
+Relevant Context: H : forall _ : P, Q
+Action: custom0 H .
+Tactic definition: Ltac custom1 H0 H1 := unfold H0; [apply H1 |..].
+Real example of this tactic being used in context:
+Goal: lt 8 9
+Action: custom1 lt le_n .
+When used properly, these tactics can save you several steps in your proof, and increase your
+chances of success, so use them whenever appropriate.
+Goals to prove:
+[GOALS]
+[GOAL] 1
+forall (A : Type) (P Q : A -> Prop),
+(exists y, P y) -> (forall x : A, P x -> Q x) -> exists y, Q y
+[END]
+Fig. 24. Example of a Copra prompt we generate on the CoqArt benchmark when learned custom tactics are
+available.
+D Example Extracted Custom Tactics
+In this appendix, we provide representative examples of custom tactics extracted by TacMiner,
+along with descriptions of their functionality and appropriate use cases in Figure 25.
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
+
+===== PAGE 36 =====
+343:36 Yutong Xin, Jimmy Xin, Gabriel Poesia, Noah Goodman, Qiaochu Chen, and Isil Dillig
+(* Introduces H0 and simplifies it. *)
+(* Best applied when H0 contains complex expressions that could be reduced before
+further processing. *)
+Ltac simplifiedIntro H0 := intros H0; [simpl in H0].
+(* Inverts H0, then immediately tries contradiction. *)
+(* Best applied when H0 leads to an immediate contradiction after inversion *)
+Ltac invertContradict H0 := inv H0; [contradiction | .. ].
+(* Solves a disjunctive goal by providing a variable to complete the left case of
+the goal. *)
+(* Best applied when the goal is of the form (exists x, P x), is a disjunction and
+left is the correct case. *)
+Ltac leftWitness H0 := left; [exists H0; [auto]].
+(* Splits the goal, and solves one with apply and the other with auto. *)
+(* Best applied when the goal is a conjunction, and H0 can be applied to solve the
+first goal. *)
+Ltac applyAndAuto H0 := split; [apply H0 | auto ].
+(* Introduces H0, H1, and eliminates H1 by case analysis, solving each case with
+auto. *)
+(* Best applied when H1 is a disjunction or an existential needing case splitting. *)
+Ltac elimAuto H0 H1 := intros H0 H1; [elim H1; [auto | auto | .. ]].
+(* Introduces an existential witness, splits into subgoals, and sovles each subgoal
+with tauto. *)
+(* Best applied when proving existentially quantified goals of the form (exists x,
+P x) where P x can be split into simpler subgoals. *)
+Ltac splitSolve H0 := exists H0; [split; [tauto | tauto]].
+(* Introduces and case splits a variable, and introduces more variables in each
+subgoal. *)
+(* Best applied when H0 is a inductive type variable or has multiple contructors. *)
+Ltac caseIntro H0 H1 H2 := intro H0; [case H0; [intro H2 | intro H1 | .. ]].
+(* Uses induction on the first hypothesis, simplifying each step, and recursively
+applies induction. *)
+(* Best applied when proving properties over recursively defined structures (e.g.,
+lists, trees, etc). *)
+Ltac nestedInduct1 := induction 1; [simpl; [try tauto] | simpl; [induction 1] | .. ].
+(* Introduces an existential witness and splits into nested goals. *)
+(* Best applied when the goal is of the form (exists x, P x) and is structured for
+multiple levels of splitting. *)
+Ltac nestedSplitSolve H0 := exists H0; [split; [auto | split; [tauto | tauto]]].
+Fig. 25. Example of a Copra prompt we generate on the CoqArt benchmark when learned custom tactics are
+available.
+Proc. ACM Program. Lang., Vol. 9, No. OOPSLA2, Article 343. Publication date: October 2025.
