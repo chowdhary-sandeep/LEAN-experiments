@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mathlib TDG Dashboard</title>
+  <script src="https://unpkg.com/cytoscape@3.29.2/dist/cytoscape.min.js"></script>
+  <style>
+    :root {
+      --ink: #103444;
+      --ink-soft: #355c6b;
+      --paper: #f5f6f1;
+      --panel: #fbfbf7;
+      --line: #bfd3d9;
+      --accent: #79c6d4;
+      --accent-strong: #54a7bb;
+      --special: #dff1f5;
+      --warn: #f2a15b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Georgia, "Palatino Linotype", serif;
+      background: linear-gradient(180deg, #f0f2eb 0%, #f7f7f3 100%);
+      color: var(--ink);
+      height: 100vh;
+      overflow: hidden;
+    }
+    .app {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      height: 100vh;
+    }
+    .sidebar {
+      border-right: 1px solid var(--line);
+      background: rgba(251, 251, 247, 0.95);
+      padding: 18px 16px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .title {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.05;
+      letter-spacing: -0.02em;
+    }
+    .subtitle {
+      margin: 0;
+      color: var(--ink-soft);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .search {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 11px 12px;
+      font-size: 14px;
+      background: white;
+      color: var(--ink);
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .stat {
+      padding: 10px 12px;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+    .stat strong {
+      display: block;
+      font-size: 18px;
+    }
+    .result-list {
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding-right: 4px;
+    }
+    .result {
+      border: 1px solid var(--line);
+      background: white;
+      border-radius: 14px;
+      padding: 10px 12px;
+      cursor: pointer;
+      transition: border-color 120ms ease, transform 120ms ease;
+      text-align: left;
+      color: var(--ink);
+    }
+    .result:hover, .result.active {
+      border-color: var(--accent-strong);
+      transform: translateY(-1px);
+    }
+    .result-name {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      word-break: break-word;
+    }
+    .result-meta {
+      font-size: 12px;
+      color: var(--ink-soft);
+    }
+    .main {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-width: 0;
+    }
+    .header {
+      padding: 18px 22px 10px 22px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(245, 246, 241, 0.85);
+    }
+    .theorem-name {
+      font-size: 22px;
+      margin: 0 0 8px 0;
+      letter-spacing: -0.02em;
+    }
+    .meta-row {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      font-size: 13px;
+      color: var(--ink-soft);
+    }
+    .statement {
+      margin-top: 10px;
+      font-size: 14px;
+      line-height: 1.45;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px;
+      white-space: pre-wrap;
+    }
+    .graph-wrap {
+      position: relative;
+      min-height: 0;
+    }
+    #cy {
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at top left, rgba(121,198,212,0.18), transparent 38%), var(--panel);
+    }
+    .collapsible-panel {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      width: 320px;
+      max-height: calc(100% - 32px);
+      overflow: auto;
+      z-index: 5;
+      background: rgba(251, 251, 247, 0.96);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 12px;
+      box-shadow: 0 10px 40px rgba(16, 52, 68, 0.08);
+    }
+    .panel-title {
+      margin: 0 0 10px 0;
+      font-size: 16px;
+    }
+    .panel-subtitle {
+      margin: 0 0 10px 0;
+      color: var(--ink-soft);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .hit-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .hit {
+      width: 100%;
+      text-align: left;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px;
+      background: white;
+      cursor: pointer;
+      color: var(--ink);
+    }
+    .hit.active {
+      border-color: var(--warn);
+      box-shadow: inset 0 0 0 2px rgba(242, 161, 91, 0.18);
+    }
+    .hit small {
+      display: block;
+      color: var(--ink-soft);
+      margin-top: 4px;
+      line-height: 1.35;
+    }
+    .clear-hit {
+      margin-top: 10px;
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 10px;
+      padding: 8px 10px;
+      cursor: pointer;
+      color: var(--ink);
+    }
+    .footer {
+      padding: 10px 18px;
+      border-top: 1px solid var(--line);
+      background: rgba(251, 251, 247, 0.95);
+      font-size: 12px;
+      color: var(--ink-soft);
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+    .legend-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      border: 1px solid var(--ink-soft);
+      display: inline-block;
+    }
+    .tip {
+      position: fixed;
+      right: 18px;
+      bottom: 48px;
+      max-width: 380px;
+      background: rgba(16, 52, 68, 0.95);
+      color: white;
+      padding: 12px 14px;
+      border-radius: 12px;
+      font-size: 12px;
+      line-height: 1.45;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 120ms ease, transform 120ms ease;
+      white-space: pre-wrap;
+    }
+    .tip.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    @media (max-width: 980px) {
+      .app { grid-template-columns: 1fr; grid-template-rows: 300px 1fr; }
+      .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+      .collapsible-panel {
+        position: static;
+        width: auto;
+        max-height: none;
+        margin: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div>
+        <h1 class="title">TDG Dashboard</h1>
+        <p class="subtitle">Search any mathlib tactic proof and inspect the proof-state-driven tactic dependency graph.</p>
+      </div>
+      <input id="searchInput" class="search" type="text" placeholder="Search theorem or file path">
+      <div class="stats">
+        <div class="stat"><strong id="totalCount">0</strong><span>theorems</span></div>
+        <div class="stat"><strong id="visibleCount">0</strong><span>matches</span></div>
+      </div>
+      <div id="resultList" class="result-list"></div>
+    </aside>
+    <main class="main">
+      <div class="header">
+        <h2 id="theoremName" class="theorem-name">Loading...</h2>
+        <div id="metaRow" class="meta-row"></div>
+        <div id="statement" class="statement">Preparing dashboard assets...</div>
+      </div>
+      <div class="graph-wrap">
+        <div id="cy"></div>
+        <div class="collapsible-panel">
+          <h3 class="panel-title">Collapsible Witnesses</h3>
+          <p class="panel-subtitle">Accepted stage-3 witnesses inside the selected theorem. Click one to highlight the matched subgraph.</p>
+          <div id="hitList" class="hit-list"></div>
+          <button id="clearHit" class="clear-hit" type="button">Clear Highlight</button>
+        </div>
+      </div>
+      <div class="footer">
+        <span class="legend-chip"><span class="dot" style="background:#9ed3e6"></span> tactic node</span>
+        <span class="legend-chip"><span class="dot" style="background:#dff1f5"></span> special node</span>
+        <span class="legend-chip">solid = goal flow</span>
+        <span class="legend-chip">dashed = hypothesis flow</span>
+        <span class="legend-chip">dotted = premise use</span>
+        <span class="legend-chip"><span class="dot" style="background:#f2a15b"></span> highlighted collapsible witness</span>
+      </div>
+    </main>
+  </div>
+  <div id="tip" class="tip"></div>
+  <script>
+    const state = {
+      index: [],
+      filtered: [],
+      activeSlug: null,
+      activeGraph: null,
+      activeHitId: null,
+      cy: null,
+    };
+
+    async function loadIndex() {
+      const response = await fetch('./dashboard_data/index.json');
+      state.index = await response.json();
+      document.getElementById('totalCount').textContent = state.index.length.toLocaleString();
+      filterResults('');
+      if (state.index.length) {
+        await loadGraph(state.index[0].slug);
+      }
+    }
+
+    function filterResults(query) {
+      const lower = query.trim().toLowerCase();
+      state.filtered = state.index.filter(item => {
+        if (!lower) return true;
+        return item.theorem.toLowerCase().includes(lower) || item.file.toLowerCase().includes(lower);
+      }).slice(0, 300);
+      document.getElementById('visibleCount').textContent = state.filtered.length.toLocaleString();
+      renderResults();
+    }
+
+    function renderResults() {
+      const list = document.getElementById('resultList');
+      list.innerHTML = '';
+      for (const item of state.filtered) {
+        const button = document.createElement('button');
+        button.className = 'result' + (item.slug === state.activeSlug ? ' active' : '');
+        button.innerHTML = `
+          <div class="result-name">${item.theorem}</div>
+          <div class="result-meta">${item.file}</div>
+          <div class="result-meta">${item.proof_length} tactics · ${item.num_edges} edges · ${item.collapsible_hits} collapsible hits</div>
+        `;
+        button.addEventListener('click', () => loadGraph(item.slug));
+        list.appendChild(button);
+      }
+    }
+
+    function edgeStyle(edgeType) {
+      if (edgeType === 'hyp_to_goal') {
+        return { lineStyle: 'dashed', color: '#2f8aa1', width: 2.2 };
+      }
+      if (edgeType === 'premise_use') {
+        return { lineStyle: 'dotted', color: '#c27430', width: 1.8 };
+      }
+      return { lineStyle: 'solid', color: '#193b48', width: 2.3 };
+    }
+
+    function objectText(objects) {
+      if (!objects || !objects.length) return 'none';
+      return objects.map(obj => `${obj.kind}: ${obj.name}`).join('\n');
+    }
+
+    function makeElements(graph) {
+      const elements = [];
+      for (const node of graph.nodes) {
+        elements.push({
+          data: {
+            id: node.id,
+            label: node.label,
+            nodeType: node.type,
+            rawTactic: node.raw_tactic || '',
+            tacticIndex: node.tactic_index,
+            inputsText: objectText(node.inputs),
+            outputsText: objectText(node.outputs),
+          }
+        });
+      }
+      for (const edge of graph.edges) {
+        const style = edgeStyle(edge.edge_type);
+        elements.push({
+          data: {
+            id: `${edge.source}->${edge.target}->${edge.object_id}`,
+            source: edge.source,
+            target: edge.target,
+            label: edge.label,
+            edgeType: edge.edge_type,
+            objectKind: edge.object_kind,
+            evidence: edge.evidence,
+            lineStyle: style.lineStyle,
+            color: style.color,
+            width: style.width,
+          }
+        });
+      }
+      return elements;
+    }
+
+    function showHeader(graph) {
+      document.getElementById('theoremName').textContent = graph.theorem;
+      document.getElementById('statement').textContent = graph.statement || '(no statement)';
+      const tacticNodes = graph.nodes.filter(node => node.type === 'tactic').length;
+      document.getElementById('metaRow').innerHTML = `
+        <span>${graph.file}</span>
+        <span>${tacticNodes} tactics</span>
+        <span>${graph.edges.length} edges</span>
+        <span>${graph.objects.length} proof objects</span>
+        <span>${(graph.collapsible_hits || []).length} collapsible witnesses</span>
+      `;
+    }
+
+    function renderHitList(graph) {
+      const list = document.getElementById('hitList');
+      list.innerHTML = '';
+      const hits = graph.collapsible_hits || [];
+      if (!hits.length) {
+        list.innerHTML = '<div class="result-meta">No accepted collapsible witness stored for this theorem.</div>';
+        return;
+      }
+      for (const hit of hits.slice(0, 80)) {
+        const button = document.createElement('button');
+        button.className = 'hit' + (hit.witness_id === state.activeHitId ? ' active' : '');
+        button.innerHTML = `
+          <strong>${hit.node_labels.join(' → ')}</strong>
+          <small>${hit.candidate_id} · support ${hit.collapsible_theorem_support} theorems · ${hit.host_node_ids.length} matched nodes</small>
+        `;
+        button.addEventListener('click', () => {
+          state.activeHitId = hit.witness_id;
+          highlightHit(hit);
+          renderHitList(graph);
+        });
+        list.appendChild(button);
+      }
+    }
+
+    function clearHighlight() {
+      state.activeHitId = null;
+      if (!state.cy) return;
+      state.cy.nodes().forEach(node => {
+        node.removeClass('highlighted-node');
+        node.removeClass('dimmed');
+      });
+      state.cy.edges().forEach(edge => {
+        edge.removeClass('highlighted-edge');
+        edge.removeClass('dimmed');
+      });
+      if (state.activeGraph) renderHitList(state.activeGraph);
+    }
+
+    function highlightHit(hit) {
+      if (!state.cy) return;
+      const nodeSet = new Set(hit.host_node_ids);
+      const pathEdges = new Set();
+      for (let i = 0; i < hit.host_node_ids.length - 1; i++) {
+        pathEdges.add(`${hit.host_node_ids[i]}->${hit.host_node_ids[i + 1]}`);
+      }
+      state.cy.nodes().forEach(node => {
+        node.removeClass('highlighted-node');
+        node.removeClass('dimmed');
+        if (nodeSet.has(node.id())) {
+          node.addClass('highlighted-node');
+        } else {
+          node.addClass('dimmed');
+        }
+      });
+      state.cy.edges().forEach(edge => {
+        edge.removeClass('highlighted-edge');
+        edge.removeClass('dimmed');
+        const key = `${edge.data('source')}->${edge.data('target')}`;
+        if (pathEdges.has(key)) {
+          edge.addClass('highlighted-edge');
+        } else {
+          edge.addClass('dimmed');
+        }
+      });
+    }
+
+    function installCy(graph) {
+      const elements = makeElements(graph);
+      if (state.cy) state.cy.destroy();
+      state.cy = cytoscape({
+        container: document.getElementById('cy'),
+        elements,
+        style: [
+          {
+            selector: 'node',
+            style: {
+              'background-color': ele => ele.data('nodeType') === 'special' ? '#dff1f5' : '#9ed3e6',
+              'border-color': '#355c6b',
+              'border-width': 1.5,
+              'label': 'data(label)',
+              'font-size': 14,
+              'font-family': 'Georgia, serif',
+              'color': '#103444',
+              'text-wrap': 'wrap',
+              'text-max-width': 120,
+              'padding': '10px',
+              'shape': 'round-rectangle',
+              'width': 'label',
+              'height': 'label'
+            }
+          },
+          {
+            selector: 'edge',
+            style: {
+              'curve-style': 'bezier',
+              'target-arrow-shape': 'triangle',
+              'target-arrow-color': 'data(color)',
+              'line-color': 'data(color)',
+              'line-style': 'data(lineStyle)',
+              'width': 'data(width)',
+              'label': 'data(label)',
+              'font-size': 11,
+              'text-background-color': '#ffffff',
+              'text-background-opacity': 0.8,
+              'text-background-padding': 2,
+              'text-rotation': 'autorotate',
+              'color': '#103444'
+            }
+          },
+          {
+            selector: '.highlighted-node',
+            style: {
+              'background-color': '#f2a15b',
+              'border-color': '#bb6a1e',
+              'border-width': 2.5,
+              'opacity': 1
+            }
+          },
+          {
+            selector: '.highlighted-edge',
+            style: {
+              'line-color': '#bb6a1e',
+              'target-arrow-color': '#bb6a1e',
+              'width': 3.5,
+              'opacity': 1
+            }
+          },
+          {
+            selector: '.dimmed',
+            style: {
+              'opacity': 0.18
+            }
+          }
+        ],
+        layout: {
+          name: 'breadthfirst',
+          directed: true,
+          padding: 18,
+          spacingFactor: 1.2,
+          animate: false
+        }
+      });
+
+      const tip = document.getElementById('tip');
+      function setTip(text) {
+        tip.textContent = text;
+        tip.classList.add('visible');
+      }
+      function hideTip() {
+        tip.classList.remove('visible');
+      }
+
+      state.cy.on('mouseover', 'node', evt => {
+        const d = evt.target.data();
+        const title = d.tacticIndex === null ? d.label : `t${d.tacticIndex}: ${d.rawTactic || d.label}`;
+        setTip(`${title}\n\ninputs\n${d.inputsText}\n\noutputs\n${d.outputsText}`);
+      });
+      state.cy.on('mouseover', 'edge', evt => {
+        const d = evt.target.data();
+        setTip(`${d.edgeType}\n${d.label}\n${d.objectKind}\n${d.evidence}`);
+      });
+      state.cy.on('mouseout', hideTip);
+      state.cy.on('pan zoom', hideTip);
+    }
+
+    async function loadGraph(slug) {
+      state.activeSlug = slug;
+      state.activeHitId = null;
+      renderResults();
+      const response = await fetch(`./dashboard_data/graphs/${slug}.json`);
+      const graph = await response.json();
+      state.activeGraph = graph;
+      showHeader(graph);
+      installCy(graph);
+      renderHitList(graph);
+    }
+
+    document.getElementById('searchInput').addEventListener('input', evt => {
+      filterResults(evt.target.value);
+    });
+    document.getElementById('clearHit').addEventListener('click', clearHighlight);
+
+    loadIndex().catch(err => {
+      document.getElementById('theoremName').textContent = 'Dashboard load failed';
+      document.getElementById('statement').textContent =
+        'This page needs the generated dashboard assets and should be served over a local HTTP server. See serve_TDG_dashboard.ps1.';
+      console.error(err);
+    });
+  </script>
+</body>
+</html>
