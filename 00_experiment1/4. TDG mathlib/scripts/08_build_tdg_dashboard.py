@@ -14,9 +14,10 @@ GRAPHS_DIR = DASHBOARD_DIR / "graphs"
 
 
 def load_collapsible_hits() -> dict[str, list[dict]]:
-    stage2_witnesses = pd.read_parquet(DATA_DIR / "stage2_isomorphic_witnesses.parquet")
-    stage3_witnesses = pd.read_parquet(DATA_DIR / "stage3_collapsible_witnesses.parquet")
-    stage3_candidates = pd.read_parquet(DATA_DIR / "stage3_collapsible_candidates.parquet")
+    stage2_witnesses = pd.read_parquet(DATA_DIR / "stage2b_connected_witnesses.parquet")
+    stage3_witnesses = pd.read_parquet(DATA_DIR / "stage3b_connected_collapsible_witnesses.parquet")
+    stage3_candidates = pd.read_parquet(DATA_DIR / "stage3b_connected_collapsible_candidates.parquet")
+    stage4_candidates = pd.read_parquet(DATA_DIR / "stage4b_connected_compression_ranking.parquet")
 
     accepted = stage3_witnesses[stage3_witnesses["is_collapsible"]].merge(
         stage2_witnesses[["candidate_id", "witness_id", "theorem", "mapping_json", "host_node_ids_json"]],
@@ -26,12 +27,16 @@ def load_collapsible_hits() -> dict[str, list[dict]]:
     candidate_lookup = {
         row["candidate_id"]: {
             "node_labels": list(row["node_labels"]),
-            "edge_labels": list(row["edge_labels"]),
+            "num_nodes": int(row["candidate_num_nodes"]) if "candidate_num_nodes" in row else int(row["num_nodes"]),
             "collapsible_theorem_support": int(row["collapsible_theorem_support"]),
             "collapsible_witness_count": int(row["collapsible_witness_count"]),
+            "estimated_corpus_savings": 0,
         }
         for _, row in stage3_candidates.iterrows()
     }
+    for _, row in stage4_candidates.iterrows():
+        if row["candidate_id"] in candidate_lookup:
+            candidate_lookup[row["candidate_id"]]["estimated_corpus_savings"] = int(row["estimated_corpus_savings"])
 
     theorem_hits: dict[str, list[dict]] = {}
     for theorem, frame in accepted.groupby("theorem"):
@@ -44,13 +49,22 @@ def load_collapsible_hits() -> dict[str, list[dict]]:
                     "candidate_id": row["candidate_id"],
                     "witness_id": row["witness_id"],
                     "node_labels": candidate["node_labels"],
-                    "edge_labels": candidate["edge_labels"],
+                    "candidate_num_nodes": candidate["num_nodes"],
                     "host_node_ids": json.loads(row["host_node_ids_json"]),
                     "mapping": json.loads(row["mapping_json"]),
                     "collapsible_theorem_support": candidate["collapsible_theorem_support"],
                     "collapsible_witness_count": candidate["collapsible_witness_count"],
+                    "estimated_corpus_savings": candidate["estimated_corpus_savings"],
                 }
             )
+        hits.sort(
+            key=lambda hit: (
+                -hit["estimated_corpus_savings"],
+                -hit["candidate_num_nodes"],
+                -len(hit["host_node_ids"]),
+                hit["candidate_id"],
+            )
+        )
         theorem_hits[theorem] = hits[:200]
     return theorem_hits
 

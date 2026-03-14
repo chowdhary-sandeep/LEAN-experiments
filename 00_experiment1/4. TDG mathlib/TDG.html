@@ -3,602 +3,833 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mathlib TDG Dashboard</title>
+  <title>Mathlib TDG Observatory</title>
   <script src="https://unpkg.com/cytoscape@3.29.2/dist/cytoscape.min.js"></script>
   <style>
     :root {
-      --ink: #103444;
-      --ink-soft: #355c6b;
-      --paper: #f5f6f1;
-      --panel: #fbfbf7;
-      --line: #bfd3d9;
-      --accent: #79c6d4;
-      --accent-strong: #54a7bb;
-      --special: #dff1f5;
-      --warn: #f2a15b;
+      --bg: #eef2ed;
+      --bg-2: #dce8df;
+      --panel: rgba(251, 252, 248, 0.9);
+      --panel-strong: rgba(255, 255, 253, 0.96);
+      --line: rgba(31, 69, 74, 0.12);
+      --line-strong: rgba(31, 69, 74, 0.24);
+      --ink: #152d33;
+      --ink-soft: #45616a;
+      --ink-faint: #6f8990;
+      --teal: #4ba6a4;
+      --teal-deep: #246f7c;
+      --blue: #69b6d8;
+      --gold: #ef9b49;
+      --gold-deep: #c46f20;
+      --mint: #d7efe7;
+      --special: #e4f4f6;
+      --shadow: 0 18px 52px rgba(17, 46, 51, 0.11);
+      --radius-xl: 28px;
+      --radius-lg: 20px;
+      --radius-md: 16px;
+      --radius-sm: 12px;
     }
+
     * { box-sizing: border-box; }
-    body {
+
+    html, body {
       margin: 0;
-      font-family: Georgia, "Palatino Linotype", serif;
-      background: linear-gradient(180deg, #f0f2eb 0%, #f7f7f3 100%);
+      min-height: 100%;
+    }
+
+    body {
+      font-family: "Aptos", "Segoe UI", sans-serif;
       color: var(--ink);
-      height: 100vh;
-      overflow: hidden;
+      background:
+        radial-gradient(circle at top left, rgba(87, 185, 187, 0.24), transparent 34%),
+        radial-gradient(circle at top right, rgba(105, 182, 216, 0.2), transparent 28%),
+        linear-gradient(180deg, var(--bg) 0%, #f6f8f4 48%, #edf3ec 100%);
     }
-    .app {
+
+    .shell {
       display: grid;
-      grid-template-columns: 340px 1fr;
-      height: 100vh;
+      grid-template-columns: 360px minmax(0, 1fr) 380px;
+      gap: 18px;
+      min-height: 100vh;
+      padding: 18px;
     }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(16px);
+      min-height: 0;
+    }
+
     .sidebar {
-      border-right: 1px solid var(--line);
-      background: rgba(251, 251, 247, 0.95);
-      padding: 18px 16px;
-      overflow: hidden;
       display: flex;
       flex-direction: column;
-      gap: 14px;
+      overflow: hidden;
     }
+
+    .sidebar-top {
+      padding: 22px 22px 14px 22px;
+      border-bottom: 1px solid var(--line);
+      background:
+        linear-gradient(135deg, rgba(228, 244, 246, 0.92), rgba(247, 251, 248, 0.88)),
+        var(--panel-strong);
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: rgba(21, 45, 51, 0.06);
+      color: var(--ink-soft);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
     .title {
-      margin: 0;
-      font-size: 24px;
-      line-height: 1.05;
-      letter-spacing: -0.02em;
+      margin: 14px 0 8px 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 34px;
+      line-height: 0.96;
+      letter-spacing: -0.04em;
     }
+
     .subtitle {
       margin: 0;
       color: var(--ink-soft);
-      font-size: 13px;
-      line-height: 1.4;
+      font-size: 14px;
+      line-height: 1.55;
+      max-width: 34ch;
     }
+
+    .search-wrap {
+      margin-top: 18px;
+      position: relative;
+    }
+
     .search {
       width: 100%;
+      padding: 14px 16px 14px 44px;
+      border-radius: 16px;
       border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 11px 12px;
-      font-size: 14px;
-      background: white;
+      background: rgba(255, 255, 255, 0.86);
       color: var(--ink);
+      font-size: 14px;
+      outline: none;
+      transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
     }
-    .stats {
+
+    .search:focus {
+      border-color: rgba(36, 111, 124, 0.42);
+      box-shadow: 0 0 0 4px rgba(75, 166, 164, 0.14);
+      background: rgba(255, 255, 255, 0.98);
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 15px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--ink-faint);
+      font-size: 16px;
+      pointer-events: none;
+    }
+
+    .sidebar-stats {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 16px;
     }
-    .stat {
-      padding: 10px 12px;
-      background: white;
+
+    .stat-card {
+      padding: 12px 13px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.74);
       border: 1px solid var(--line);
-      border-radius: 12px;
     }
-    .stat strong {
+
+    .stat-label {
       display: block;
-      font-size: 18px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--ink-faint);
+      margin-bottom: 5px;
     }
+
+    .stat-value {
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .result-toolbar {
+      padding: 14px 22px 0 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--ink-soft);
+      font-size: 12px;
+    }
+
     .result-list {
+      padding: 12px 16px 18px 16px;
       overflow: auto;
       display: flex;
       flex-direction: column;
-      gap: 8px;
-      padding-right: 4px;
+      gap: 10px;
     }
+
     .result {
       border: 1px solid var(--line);
-      background: white;
-      border-radius: 14px;
-      padding: 10px 12px;
+      background: rgba(255, 255, 255, 0.88);
+      border-radius: 18px;
+      padding: 14px 14px 13px 14px;
       cursor: pointer;
-      transition: border-color 120ms ease, transform 120ms ease;
-      text-align: left;
       color: var(--ink);
+      text-align: left;
+      transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
     }
+
     .result:hover, .result.active {
-      border-color: var(--accent-strong);
       transform: translateY(-1px);
+      border-color: rgba(36, 111, 124, 0.34);
+      box-shadow: 0 12px 24px rgba(18, 54, 60, 0.1);
     }
+
+    .result.active {
+      background:
+        linear-gradient(180deg, rgba(228, 244, 246, 0.76), rgba(255, 255, 255, 0.96)),
+        white;
+    }
+
     .result-name {
+      margin: 0 0 6px 0;
       font-size: 14px;
+      line-height: 1.35;
       font-weight: 700;
-      margin-bottom: 4px;
       word-break: break-word;
     }
-    .result-meta {
+
+    .result-file {
+      font-size: 12px;
+      color: var(--ink-soft);
+      margin-bottom: 9px;
+    }
+
+    .result-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .result-chip {
+      padding: 8px 9px;
+      border-radius: 12px;
+      background: rgba(21, 45, 51, 0.045);
+      font-size: 11px;
+      color: var(--ink-soft);
+    }
+
+    .result-chip strong {
+      display: block;
+      color: var(--ink);
+      font-size: 14px;
+      margin-top: 2px;
+    }
+
+    .result-statement {
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--ink-soft);
+    }
+
+    .main {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      overflow: hidden;
+    }
+
+    .hero {
+      padding: 24px 24px 18px 24px;
+      border-bottom: 1px solid var(--line);
+      background:
+        radial-gradient(circle at top right, rgba(105, 182, 216, 0.18), transparent 32%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(246, 250, 246, 0.88));
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.9fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .hero-title {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 28px;
+      line-height: 1.03;
+      letter-spacing: -0.04em;
+      word-break: break-word;
+    }
+
+    .hero-meta {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 11px;
+      border-radius: 999px;
+      border: 1px solid rgba(36, 111, 124, 0.14);
+      background: rgba(255, 255, 255, 0.82);
       font-size: 12px;
       color: var(--ink-soft);
     }
-    .main {
-      display: grid;
-      grid-template-rows: auto 1fr auto;
-      min-width: 0;
-    }
-    .header {
-      padding: 18px 22px 10px 22px;
-      border-bottom: 1px solid var(--line);
-      background: rgba(245, 246, 241, 0.85);
-    }
-    .theorem-name {
-      font-size: 22px;
-      margin: 0 0 8px 0;
-      letter-spacing: -0.02em;
-    }
-    .meta-row {
-      display: flex;
-      gap: 16px;
-      flex-wrap: wrap;
-      font-size: 13px;
-      color: var(--ink-soft);
-    }
-    .statement {
-      margin-top: 10px;
-      font-size: 14px;
-      line-height: 1.45;
-      background: white;
+
+    .statement-card {
+      margin-top: 14px;
+      padding: 14px 16px;
+      border-radius: 18px;
       border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.76);
+      font-size: 14px;
+      line-height: 1.55;
       white-space: pre-wrap;
     }
-    .graph-wrap {
+
+    .hero-stats {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .hero-stat {
+      padding: 14px 15px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.82);
+    }
+
+    .hero-stat strong {
+      display: block;
+      margin-top: 8px;
+      font-size: 24px;
+      line-height: 1;
+    }
+
+    .hero-stat span {
+      font-size: 11px;
+      color: var(--ink-faint);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .toolbar {
+      padding: 14px 24px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      background: rgba(248, 251, 247, 0.88);
+    }
+
+    .toolbar-left,
+    .toolbar-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .button,
+    .toggle {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.84);
+      color: var(--ink);
+      border-radius: 14px;
+      padding: 10px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+    }
+
+    .button:hover,
+    .toggle:hover {
+      transform: translateY(-1px);
+      border-color: var(--line-strong);
+    }
+
+    .toggle.active {
+      background: rgba(36, 111, 124, 0.12);
+      border-color: rgba(36, 111, 124, 0.3);
+    }
+
+    .graph-stage {
       position: relative;
       min-height: 0;
+      padding: 18px;
+      background:
+        linear-gradient(180deg, rgba(240, 247, 242, 0.9), rgba(249, 251, 248, 0.78));
     }
+
+    .graph-frame {
+      position: relative;
+      height: 100%;
+      min-height: 440px;
+      border-radius: 24px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      background:
+        radial-gradient(circle at top left, rgba(75, 166, 164, 0.12), transparent 32%),
+        radial-gradient(circle at bottom right, rgba(105, 182, 216, 0.12), transparent 34%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(244, 249, 246, 0.94));
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    }
+
     #cy {
       width: 100%;
       height: 100%;
-      background: radial-gradient(circle at top left, rgba(121,198,212,0.18), transparent 38%), var(--panel);
     }
-    .collapsible-panel {
+
+    .graph-overlay {
       position: absolute;
-      top: 16px;
+      left: 16px;
       right: 16px;
-      width: 320px;
-      max-height: calc(100% - 32px);
-      overflow: auto;
-      z-index: 5;
-      background: rgba(251, 251, 247, 0.96);
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      padding: 12px;
-      box-shadow: 0 10px 40px rgba(16, 52, 68, 0.08);
-    }
-    .panel-title {
-      margin: 0 0 10px 0;
-      font-size: 16px;
-    }
-    .panel-subtitle {
-      margin: 0 0 10px 0;
-      color: var(--ink-soft);
-      font-size: 12px;
-      line-height: 1.4;
-    }
-    .hit-list {
+      top: 16px;
       display: flex;
-      flex-direction: column;
-      gap: 8px;
+      justify-content: space-between;
+      gap: 12px;
+      pointer-events: none;
     }
-    .hit {
-      width: 100%;
-      text-align: left;
+
+    .overlay-card {
+      pointer-events: auto;
+      padding: 10px 12px;
+      border-radius: 15px;
       border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 10px;
-      background: white;
-      cursor: pointer;
-      color: var(--ink);
+      background: rgba(255, 255, 255, 0.86);
+      box-shadow: 0 10px 28px rgba(23, 51, 56, 0.08);
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--ink-soft);
     }
-    .hit.active {
-      border-color: var(--warn);
-      box-shadow: inset 0 0 0 2px rgba(242, 161, 91, 0.18);
-    }
-    .hit small {
+
+    .overlay-card strong {
       display: block;
-      color: var(--ink-soft);
-      margin-top: 4px;
-      line-height: 1.35;
-    }
-    .clear-hit {
-      margin-top: 10px;
-      width: 100%;
-      border: 1px solid var(--line);
-      background: #fff;
-      border-radius: 10px;
-      padding: 8px 10px;
-      cursor: pointer;
+      margin-bottom: 4px;
       color: var(--ink);
-    }
-    .footer {
-      padding: 10px 18px;
-      border-top: 1px solid var(--line);
-      background: rgba(251, 251, 247, 0.95);
       font-size: 12px;
-      color: var(--ink-soft);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .legend-row {
       display: flex;
-      gap: 18px;
+      align-items: center;
+      gap: 12px;
       flex-wrap: wrap;
     }
+
     .legend-chip {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
     }
-    .dot {
-      width: 12px;
-      height: 12px;
+
+    .swatch {
+      width: 14px;
+      height: 14px;
       border-radius: 999px;
-      border: 1px solid var(--ink-soft);
-      display: inline-block;
+      border: 1px solid rgba(21, 45, 51, 0.35);
     }
+
+    .line-swatch {
+      width: 24px;
+      height: 0;
+      border-top: 3px solid var(--ink);
+    }
+
+    .line-swatch.hyp {
+      border-top-style: dashed;
+      border-top-color: var(--teal-deep);
+    }
+
+    .line-swatch.premise {
+      border-top-style: dotted;
+      border-top-color: var(--gold-deep);
+    }
+
+    .footer-note {
+      padding: 12px 20px 18px 20px;
+      color: var(--ink-faint);
+      font-size: 12px;
+      border-top: 1px solid var(--line);
+      background: rgba(248, 251, 247, 0.86);
+    }
+
+    .inspector {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      overflow: hidden;
+    }
+
+    .inspector-top {
+      padding: 22px 22px 16px 22px;
+      border-bottom: 1px solid var(--line);
+      background:
+        radial-gradient(circle at top left, rgba(239, 155, 73, 0.14), transparent 32%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 251, 247, 0.9));
+    }
+
+    .inspector-top h2 {
+      margin: 0 0 8px 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 24px;
+      line-height: 1.02;
+      letter-spacing: -0.03em;
+    }
+
+    .inspector-top p {
+      margin: 0;
+      color: var(--ink-soft);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .detail-card {
+      margin: 14px 22px 0 22px;
+      padding: 14px 15px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.78);
+    }
+
+    .detail-card h3 {
+      margin: 0 0 8px 0;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--ink-faint);
+    }
+
+    .detail-card .detail-title {
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.4;
+      margin-bottom: 6px;
+      word-break: break-word;
+    }
+
+    .detail-card .detail-body {
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--ink-soft);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .proof-card {
+      margin: 14px 22px 0 22px;
+      padding: 14px 15px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(21, 45, 51, 0.96);
+      color: #f6faf8;
+    }
+
+    .proof-card summary {
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .proof-card pre {
+      margin: 12px 0 0 0;
+      font-family: "Cascadia Code", "Consolas", monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: rgba(246, 250, 248, 0.92);
+    }
+
+    .hit-panel {
+      padding: 16px 16px 18px 16px;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .hit-empty {
+      padding: 16px;
+      border-radius: 16px;
+      border: 1px dashed var(--line-strong);
+      background: rgba(255, 255, 255, 0.68);
+      color: var(--ink-soft);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .hit {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.88);
+      padding: 14px;
+      cursor: pointer;
+      color: var(--ink);
+      transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+      text-align: left;
+    }
+
+    .hit:hover,
+    .hit.active {
+      transform: translateY(-1px);
+      border-color: rgba(196, 111, 32, 0.36);
+      box-shadow: 0 10px 28px rgba(33, 47, 30, 0.08);
+    }
+
+    .hit.active {
+      background:
+        linear-gradient(180deg, rgba(255, 244, 232, 0.94), rgba(255, 255, 255, 0.98)),
+        white;
+      box-shadow: inset 0 0 0 2px rgba(239, 155, 73, 0.14), 0 10px 28px rgba(33, 47, 30, 0.08);
+    }
+
+    .hit-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: start;
+    }
+
+    .hit-title {
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.35;
+    }
+
+    .hit-badge {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      background: rgba(239, 155, 73, 0.14);
+      color: var(--gold-deep);
+      padding: 7px 9px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .hit-meta {
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .hit-meta div {
+      padding: 9px 10px;
+      border-radius: 12px;
+      background: rgba(21, 45, 51, 0.045);
+      font-size: 11px;
+      color: var(--ink-soft);
+    }
+
+    .hit-meta strong {
+      display: block;
+      margin-top: 3px;
+      color: var(--ink);
+      font-size: 14px;
+    }
+
+    .hit-caption {
+      margin-top: 10px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--ink-soft);
+    }
+
     .tip {
       position: fixed;
-      right: 18px;
-      bottom: 48px;
-      max-width: 380px;
-      background: rgba(16, 52, 68, 0.95);
-      color: white;
-      padding: 12px 14px;
-      border-radius: 12px;
+      right: 26px;
+      bottom: 24px;
+      width: min(420px, calc(100vw - 36px));
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(19, 40, 45, 0.96);
+      color: #f5fbf8;
+      box-shadow: 0 20px 52px rgba(12, 30, 34, 0.35);
       font-size: 12px;
-      line-height: 1.45;
+      line-height: 1.55;
+      white-space: pre-wrap;
       pointer-events: none;
       opacity: 0;
-      transform: translateY(8px);
+      transform: translateY(10px);
       transition: opacity 120ms ease, transform 120ms ease;
-      white-space: pre-wrap;
+      z-index: 30;
     }
+
     .tip.visible {
       opacity: 1;
       transform: translateY(0);
     }
-    @media (max-width: 980px) {
-      .app { grid-template-columns: 1fr; grid-template-rows: 300px 1fr; }
-      .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
-      .collapsible-panel {
-        position: static;
-        width: auto;
-        max-height: none;
-        margin: 12px;
-      }
+
+    @media (max-width: 1380px) {
+      .shell { grid-template-columns: 320px minmax(0, 1fr) 340px; }
+      .hero-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 1120px) {
+      .shell { grid-template-columns: 1fr; grid-template-rows: auto auto auto; }
+      .sidebar, .main, .inspector { min-height: auto; }
+      .graph-frame { min-height: 520px; }
+    }
+
+    @media (max-width: 760px) {
+      .shell { padding: 10px; gap: 10px; }
+      .sidebar-top, .hero, .inspector-top { padding: 18px; }
+      .toolbar, .graph-stage { padding: 12px; }
+      .hero-stat strong { font-size: 20px; }
+      .result-grid, .hit-meta, .hero-stats, .sidebar-stats { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
 <body>
-  <div class="app">
-    <aside class="sidebar">
-      <div>
-        <h1 class="title">TDG Dashboard</h1>
-        <p class="subtitle">Search any mathlib tactic proof and inspect the proof-state-driven tactic dependency graph.</p>
+  <div class="shell">
+    <aside class="panel sidebar">
+      <div class="sidebar-top">
+        <div class="eyebrow">Mathlib Proof Mining</div>
+        <h1 class="title">TDG Observatory</h1>
+        <p class="subtitle">
+          Search theorem-scale tactic dependency graphs, inspect proof-object flow, and view connected
+          collapsible witnesses ranked by estimated corpus compression.
+        </p>
+        <div class="search-wrap">
+          <span class="search-icon">⌕</span>
+          <input id="searchInput" class="search" type="search" placeholder="Search theorem, file, tactic pattern">
+        </div>
+        <div class="sidebar-stats">
+          <div class="stat-card">
+            <span class="stat-label">Theorems</span>
+            <span id="statTheorems" class="stat-value">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Visible</span>
+            <span id="statVisible" class="stat-value">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Median Tactics</span>
+            <span id="statMedian" class="stat-value">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">With Hits</span>
+            <span id="statHitRate" class="stat-value">0%</span>
+          </div>
+        </div>
       </div>
-      <input id="searchInput" class="search" type="text" placeholder="Search theorem or file path">
-      <div class="stats">
-        <div class="stat"><strong id="totalCount">0</strong><span>theorems</span></div>
-        <div class="stat"><strong id="visibleCount">0</strong><span>matches</span></div>
+      <div class="result-toolbar">
+        <span id="resultSummary">Loading theorem index...</span>
+        <span>sorted by search match</span>
       </div>
       <div id="resultList" class="result-list"></div>
     </aside>
-    <main class="main">
-      <div class="header">
-        <h2 id="theoremName" class="theorem-name">Loading...</h2>
-        <div id="metaRow" class="meta-row"></div>
-        <div id="statement" class="statement">Preparing dashboard assets...</div>
-      </div>
-      <div class="graph-wrap">
-        <div id="cy"></div>
-        <div class="collapsible-panel">
-          <h3 class="panel-title">Collapsible Witnesses</h3>
-          <p class="panel-subtitle">Accepted stage-3 witnesses inside the selected theorem. Click one to highlight the matched subgraph.</p>
-          <div id="hitList" class="hit-list"></div>
-          <button id="clearHit" class="clear-hit" type="button">Clear Highlight</button>
+
+    <main class="panel main">
+      <section class="hero">
+        <div class="hero-grid">
+          <div>
+            <h2 id="theoremName" class="hero-title">Loading theorem index...</h2>
+            <div id="heroMeta" class="hero-meta"></div>
+            <div id="statement" class="statement-card">
+              This dashboard expects generated assets under `dashboard_data/` and should be served by the local script.
+            </div>
+          </div>
+          <div id="heroStats" class="hero-stats"></div>
         </div>
-      </div>
-      <div class="footer">
-        <span class="legend-chip"><span class="dot" style="background:#9ed3e6"></span> tactic node</span>
-        <span class="legend-chip"><span class="dot" style="background:#dff1f5"></span> special node</span>
-        <span class="legend-chip">solid = goal flow</span>
-        <span class="legend-chip">dashed = hypothesis flow</span>
-        <span class="legend-chip">dotted = premise use</span>
-        <span class="legend-chip"><span class="dot" style="background:#f2a15b"></span> highlighted collapsible witness</span>
+      </section>
+
+      <section class="toolbar">
+        <div class="toolbar-left">
+          <button id="fitButton" class="button">Fit Graph</button>
+          <button id="clearHitButton" class="button">Clear Witness Highlight</button>
+          <button id="clearSelectionButton" class="button">Clear Selection</button>
+        </div>
+        <div class="toolbar-right">
+          <button id="dimToggle" class="toggle active">Dim Outside Witness</button>
+        </div>
+      </section>
+
+      <section class="graph-stage">
+        <div class="graph-frame">
+          <div id="cy"></div>
+          <div class="graph-overlay">
+            <div class="overlay-card">
+              <strong>Graph Legend</strong>
+              <div class="legend-row">
+                <span class="legend-chip"><span class="swatch" style="background:#8ad0df"></span> tactic node</span>
+                <span class="legend-chip"><span class="swatch" style="background:#e4f4f6"></span> in/out node</span>
+                <span class="legend-chip"><span class="swatch" style="background:#ef9b49"></span> highlighted witness</span>
+              </div>
+            </div>
+            <div class="overlay-card">
+              <strong>Edge Legend</strong>
+              <div class="legend-row">
+                <span class="legend-chip"><span class="line-swatch"></span> goal flow</span>
+                <span class="legend-chip"><span class="line-swatch hyp"></span> hypothesis flow</span>
+                <span class="legend-chip"><span class="line-swatch premise"></span> premise use</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="footer-note">
+        TDG nodes represent tactic applications plus special `in` / `out` nodes. Hover nodes or edges for proof-object detail. Connected collapsible witnesses are sorted by estimated corpus savings from the stage 4B ranking.
       </div>
     </main>
+
+    <aside class="panel inspector">
+      <div class="inspector-top">
+        <h2>Collapsibility Lens</h2>
+        <p>
+          Inspect the selected theorem from two directions: node-level TDG detail and candidate-level
+          connected witnesses that may support tactic compression.
+        </p>
+      </div>
+
+      <div id="selectionCard" class="detail-card">
+        <h3>Selection</h3>
+        <div class="detail-title">Nothing selected yet</div>
+        <div class="detail-body">Click a node or edge in the graph to inspect its local proof-object evidence.</div>
+      </div>
+
+      <details class="proof-card">
+        <summary>Proof Text</summary>
+        <pre id="proofText">(proof text unavailable)</pre>
+      </details>
+
+      <div id="hitPanel" class="hit-panel"></div>
+    </aside>
   </div>
+
   <div id="tip" class="tip"></div>
-  <script>
-    const state = {
-      index: [],
-      filtered: [],
-      activeSlug: null,
-      activeGraph: null,
-      activeHitId: null,
-      cy: null,
-    };
-
-    async function loadIndex() {
-      const response = await fetch('./dashboard_data/index.json');
-      state.index = await response.json();
-      document.getElementById('totalCount').textContent = state.index.length.toLocaleString();
-      filterResults('');
-      if (state.index.length) {
-        await loadGraph(state.index[0].slug);
-      }
-    }
-
-    function filterResults(query) {
-      const lower = query.trim().toLowerCase();
-      state.filtered = state.index.filter(item => {
-        if (!lower) return true;
-        return item.theorem.toLowerCase().includes(lower) || item.file.toLowerCase().includes(lower);
-      }).slice(0, 300);
-      document.getElementById('visibleCount').textContent = state.filtered.length.toLocaleString();
-      renderResults();
-    }
-
-    function renderResults() {
-      const list = document.getElementById('resultList');
-      list.innerHTML = '';
-      for (const item of state.filtered) {
-        const button = document.createElement('button');
-        button.className = 'result' + (item.slug === state.activeSlug ? ' active' : '');
-        button.innerHTML = `
-          <div class="result-name">${item.theorem}</div>
-          <div class="result-meta">${item.file}</div>
-          <div class="result-meta">${item.proof_length} tactics · ${item.num_edges} edges · ${item.collapsible_hits} collapsible hits</div>
-        `;
-        button.addEventListener('click', () => loadGraph(item.slug));
-        list.appendChild(button);
-      }
-    }
-
-    function edgeStyle(edgeType) {
-      if (edgeType === 'hyp_to_goal') {
-        return { lineStyle: 'dashed', color: '#2f8aa1', width: 2.2 };
-      }
-      if (edgeType === 'premise_use') {
-        return { lineStyle: 'dotted', color: '#c27430', width: 1.8 };
-      }
-      return { lineStyle: 'solid', color: '#193b48', width: 2.3 };
-    }
-
-    function objectText(objects) {
-      if (!objects || !objects.length) return 'none';
-      return objects.map(obj => `${obj.kind}: ${obj.name}`).join('\n');
-    }
-
-    function makeElements(graph) {
-      const elements = [];
-      for (const node of graph.nodes) {
-        elements.push({
-          data: {
-            id: node.id,
-            label: node.label,
-            nodeType: node.type,
-            rawTactic: node.raw_tactic || '',
-            tacticIndex: node.tactic_index,
-            inputsText: objectText(node.inputs),
-            outputsText: objectText(node.outputs),
-          }
-        });
-      }
-      for (const edge of graph.edges) {
-        const style = edgeStyle(edge.edge_type);
-        elements.push({
-          data: {
-            id: `${edge.source}->${edge.target}->${edge.object_id}`,
-            source: edge.source,
-            target: edge.target,
-            label: edge.label,
-            edgeType: edge.edge_type,
-            objectKind: edge.object_kind,
-            evidence: edge.evidence,
-            lineStyle: style.lineStyle,
-            color: style.color,
-            width: style.width,
-          }
-        });
-      }
-      return elements;
-    }
-
-    function showHeader(graph) {
-      document.getElementById('theoremName').textContent = graph.theorem;
-      document.getElementById('statement').textContent = graph.statement || '(no statement)';
-      const tacticNodes = graph.nodes.filter(node => node.type === 'tactic').length;
-      document.getElementById('metaRow').innerHTML = `
-        <span>${graph.file}</span>
-        <span>${tacticNodes} tactics</span>
-        <span>${graph.edges.length} edges</span>
-        <span>${graph.objects.length} proof objects</span>
-        <span>${(graph.collapsible_hits || []).length} collapsible witnesses</span>
-      `;
-    }
-
-    function renderHitList(graph) {
-      const list = document.getElementById('hitList');
-      list.innerHTML = '';
-      const hits = graph.collapsible_hits || [];
-      if (!hits.length) {
-        list.innerHTML = '<div class="result-meta">No accepted collapsible witness stored for this theorem.</div>';
-        return;
-      }
-      for (const hit of hits.slice(0, 80)) {
-        const button = document.createElement('button');
-        button.className = 'hit' + (hit.witness_id === state.activeHitId ? ' active' : '');
-        button.innerHTML = `
-          <strong>${hit.node_labels.join(' → ')}</strong>
-          <small>${hit.candidate_id} · support ${hit.collapsible_theorem_support} theorems · ${hit.host_node_ids.length} matched nodes</small>
-        `;
-        button.addEventListener('click', () => {
-          state.activeHitId = hit.witness_id;
-          highlightHit(hit);
-          renderHitList(graph);
-        });
-        list.appendChild(button);
-      }
-    }
-
-    function clearHighlight() {
-      state.activeHitId = null;
-      if (!state.cy) return;
-      state.cy.nodes().forEach(node => {
-        node.removeClass('highlighted-node');
-        node.removeClass('dimmed');
-      });
-      state.cy.edges().forEach(edge => {
-        edge.removeClass('highlighted-edge');
-        edge.removeClass('dimmed');
-      });
-      if (state.activeGraph) renderHitList(state.activeGraph);
-    }
-
-    function highlightHit(hit) {
-      if (!state.cy) return;
-      const nodeSet = new Set(hit.host_node_ids);
-      const pathEdges = new Set();
-      for (let i = 0; i < hit.host_node_ids.length - 1; i++) {
-        pathEdges.add(`${hit.host_node_ids[i]}->${hit.host_node_ids[i + 1]}`);
-      }
-      state.cy.nodes().forEach(node => {
-        node.removeClass('highlighted-node');
-        node.removeClass('dimmed');
-        if (nodeSet.has(node.id())) {
-          node.addClass('highlighted-node');
-        } else {
-          node.addClass('dimmed');
-        }
-      });
-      state.cy.edges().forEach(edge => {
-        edge.removeClass('highlighted-edge');
-        edge.removeClass('dimmed');
-        const key = `${edge.data('source')}->${edge.data('target')}`;
-        if (pathEdges.has(key)) {
-          edge.addClass('highlighted-edge');
-        } else {
-          edge.addClass('dimmed');
-        }
-      });
-    }
-
-    function installCy(graph) {
-      const elements = makeElements(graph);
-      if (state.cy) state.cy.destroy();
-      state.cy = cytoscape({
-        container: document.getElementById('cy'),
-        elements,
-        style: [
-          {
-            selector: 'node',
-            style: {
-              'background-color': ele => ele.data('nodeType') === 'special' ? '#dff1f5' : '#9ed3e6',
-              'border-color': '#355c6b',
-              'border-width': 1.5,
-              'label': 'data(label)',
-              'font-size': 14,
-              'font-family': 'Georgia, serif',
-              'color': '#103444',
-              'text-wrap': 'wrap',
-              'text-max-width': 120,
-              'padding': '10px',
-              'shape': 'round-rectangle',
-              'width': 'label',
-              'height': 'label'
-            }
-          },
-          {
-            selector: 'edge',
-            style: {
-              'curve-style': 'bezier',
-              'target-arrow-shape': 'triangle',
-              'target-arrow-color': 'data(color)',
-              'line-color': 'data(color)',
-              'line-style': 'data(lineStyle)',
-              'width': 'data(width)',
-              'label': 'data(label)',
-              'font-size': 11,
-              'text-background-color': '#ffffff',
-              'text-background-opacity': 0.8,
-              'text-background-padding': 2,
-              'text-rotation': 'autorotate',
-              'color': '#103444'
-            }
-          },
-          {
-            selector: '.highlighted-node',
-            style: {
-              'background-color': '#f2a15b',
-              'border-color': '#bb6a1e',
-              'border-width': 2.5,
-              'opacity': 1
-            }
-          },
-          {
-            selector: '.highlighted-edge',
-            style: {
-              'line-color': '#bb6a1e',
-              'target-arrow-color': '#bb6a1e',
-              'width': 3.5,
-              'opacity': 1
-            }
-          },
-          {
-            selector: '.dimmed',
-            style: {
-              'opacity': 0.18
-            }
-          }
-        ],
-        layout: {
-          name: 'breadthfirst',
-          directed: true,
-          padding: 18,
-          spacingFactor: 1.2,
-          animate: false
-        }
-      });
-
-      const tip = document.getElementById('tip');
-      function setTip(text) {
-        tip.textContent = text;
-        tip.classList.add('visible');
-      }
-      function hideTip() {
-        tip.classList.remove('visible');
-      }
-
-      state.cy.on('mouseover', 'node', evt => {
-        const d = evt.target.data();
-        const title = d.tacticIndex === null ? d.label : `t${d.tacticIndex}: ${d.rawTactic || d.label}`;
-        setTip(`${title}\n\ninputs\n${d.inputsText}\n\noutputs\n${d.outputsText}`);
-      });
-      state.cy.on('mouseover', 'edge', evt => {
-        const d = evt.target.data();
-        setTip(`${d.edgeType}\n${d.label}\n${d.objectKind}\n${d.evidence}`);
-      });
-      state.cy.on('mouseout', hideTip);
-      state.cy.on('pan zoom', hideTip);
-    }
-
-    async function loadGraph(slug) {
-      state.activeSlug = slug;
-      state.activeHitId = null;
-      renderResults();
-      const response = await fetch(`./dashboard_data/graphs/${slug}.json`);
-      const graph = await response.json();
-      state.activeGraph = graph;
-      showHeader(graph);
-      installCy(graph);
-      renderHitList(graph);
-    }
-
-    document.getElementById('searchInput').addEventListener('input', evt => {
-      filterResults(evt.target.value);
-    });
-    document.getElementById('clearHit').addEventListener('click', clearHighlight);
-
-    loadIndex().catch(err => {
-      document.getElementById('theoremName').textContent = 'Dashboard load failed';
-      document.getElementById('statement').textContent =
-        'This page needs the generated dashboard assets and should be served over a local HTTP server. See serve_TDG_dashboard.ps1.';
-      console.error(err);
-    });
-  </script>
 </body>
 </html>
