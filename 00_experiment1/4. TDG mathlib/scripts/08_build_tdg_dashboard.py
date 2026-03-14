@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict, deque
 import json
 from pathlib import Path
 
@@ -11,6 +12,92 @@ from tdg_utils import ROOT, theorem_slug
 DATA_DIR = ROOT / "data"
 DASHBOARD_DIR = ROOT / "dashboard_data"
 GRAPHS_DIR = DASHBOARD_DIR / "graphs"
+
+
+def _node_sort_key(node: dict) -> tuple[int, int, str]:
+    node_type = node.get("node_type", "")
+    if node_type == "special":
+        head = node.get("tactic_head", "")
+        if head == "in":
+            return (0, -1, node["node_id"])
+        if head == "out":
+            return (2, 10**9, node["node_id"])
+    tactic_index = node.get("tactic_index")
+    return (1, tactic_index if tactic_index is not None else 10**8, node["node_id"])
+
+
+def compute_node_positions(graph: dict) -> dict[str, dict[str, float]]:
+    """Compute node positions using improved layered layout with proper spacing."""
+    nodes = {node["node_id"]: node for node in graph["nodes"]}
+    adjacency: dict[str, set[str]] = defaultdict(set)
+    indegree = {node_id: 0 for node_id in nodes}
+    reverse_adj: dict[str, set[str]] = defaultdict(set)
+
+    for edge in graph["edges"]:
+        src = edge["src_node_id"]
+        dst = edge["dst_node_id"]
+        if src not in nodes or dst not in nodes or dst in adjacency[src]:
+            continue
+        adjacency[src].add(dst)
+        reverse_adj[dst].add(src)
+        indegree[dst] += 1
+
+    # Topological sort with levels
+    queue = deque(sorted((node_id for node_id, deg in indegree.items() if deg == 0), key=lambda node_id: _node_sort_key(nodes[node_id])))
+    topo_order: list[str] = []
+    level = {node_id: 0 for node_id in nodes}
+
+    while queue:
+        node_id = queue.popleft()
+        topo_order.append(node_id)
+        for dst in sorted(adjacency[node_id], key=lambda other: _node_sort_key(nodes[other])):
+            level[dst] = max(level[dst], level[node_id] + 1)
+            indegree[dst] -= 1
+            if indegree[dst] == 0:
+                queue.append(dst)
+
+    if len(topo_order) != len(nodes):
+        topo_order = sorted(nodes, key=lambda node_id: _node_sort_key(nodes[node_id]))
+        for rank, node_id in enumerate(topo_order):
+            level[node_id] = rank
+
+    layers: dict[int, list[str]] = defaultdict(list)
+    for node_id in topo_order:
+        layers[level[node_id]].append(node_id)
+
+    # Improved positioning with better spacing
+    max_width = max((len(layer) for layer in layers.values()), default=1)
+
+    # Dynamic spacing based on graph size
+    if max_width <= 3:
+        dx = 180.0
+    elif max_width <= 6:
+        dx = 140.0
+    elif max_width <= 10:
+        dx = 100.0
+    else:
+        dx = 80.0
+    dy = 120.0
+
+    # Position nodes with centering and better spread
+    positions: dict[str, dict[str, float]] = {}
+    for depth in sorted(layers):
+        layer = sorted(layers[depth], key=lambda node_id: _node_sort_key(nodes[node_id]))
+        # Center the layer
+        start_x = -((len(layer) - 1) * dx) / 2.0
+        for index, node_id in enumerate(layer):
+            x = start_x + index * dx
+            y = depth * dy
+
+            # Add slight jitter to overlapping nodes at same position
+            x += (index % 3 - 1) * 15
+
+            positions[node_id] = {
+                "x": round(x, 2),
+                "y": round(y, 2),
+            }
+
+    return positions
 
 
 def load_collapsible_hits() -> dict[str, list[dict]]:
@@ -70,6 +157,7 @@ def load_collapsible_hits() -> dict[str, list[dict]]:
 
 
 def compact_graph(graph: dict, collapsible_hits: list[dict]) -> dict:
+    positions = compute_node_positions(graph)
     node_payload = []
     for node in graph["nodes"]:
         if node["node_type"] == "special":
@@ -85,6 +173,7 @@ def compact_graph(graph: dict, collapsible_hits: list[dict]) -> dict:
                 "raw_tactic": node["raw_tactic"],
                 "inputs": json.loads(node["actual_inputs_json"]),
                 "outputs": json.loads(node["actual_outputs_json"]),
+                "position": positions.get(node["node_id"], {"x": 0.0, "y": 0.0}),
             }
         )
 
@@ -146,7 +235,6 @@ def main() -> None:
                     "num_edges": len(compact["edges"]),
                     "proof_length": sum(1 for node in compact["nodes"] if node["type"] == "tactic"),
                     "collapsible_hits": len(hits),
-                    "statement": graph["statement"].replace("\n", " ")[:240],
                 }
             )
             if line_num % 5000 == 0:

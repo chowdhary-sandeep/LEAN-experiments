@@ -437,3 +437,73 @@ The immediate execution sequence is:
 3. rebuild dashboard assets,
 4. verify that theorem JSON payloads now contain connected-subgraph witness metadata,
 5. and verify that the browser UI highlights induced witness subgraphs correctly.
+
+## 2026-03-14 dashboard performance/layout follow-up
+
+After the first redesign pass, two practical issues were clear:
+
+- the graph renderer was too expensive for larger theorem TDGs,
+- and the previous layout made some proofs look unnaturally narrow or overly stretched.
+
+### Corrections applied
+
+- switched from the coarse `breadthfirst` layout to a DAG-oriented `dagre` layout,
+- added explicit orientation controls for top-down versus left-right viewing,
+- turned edge labels off by default and made them opt-in,
+- enabled Cytoscape viewport performance options so panning and zooming are lighter,
+- and kept witness highlighting while reducing the always-on rendering burden.
+
+### Why this should help
+
+- `dagre` is better matched to proof DAG structure than the previous layout,
+- hiding edge labels by default removes a major source of paint cost on dense graphs,
+- and orientation control lets the user pick the more readable aspect ratio for a given theorem.
+
+This does not solve every future dashboard problem, but it is the right immediate correction for the lag and poor proof geometry.
+
+## 2026-03-14 dashboard performance fix: precomputed node positions
+
+The previous browser-side layout attempt was still too expensive and also introduced a failure mode where the graph region could remain empty if the client-side layout path was not fully consistent.
+
+So the stronger correction was:
+
+- precompute theorem-local node positions in `scripts/08_build_tdg_dashboard.py`,
+- store those positions directly in each theorem JSON under `dashboard_data/graphs/`,
+- and render the graph with Cytoscape `preset` layout instead of any in-browser search procedure.
+
+### Why this is the right fix
+
+- theorem selection now becomes JSON fetch plus draw, not layout computation,
+- orientation switching becomes a cheap coordinate swap,
+- graph visibility no longer depends on optional client-side layout plugins,
+- and the dashboard can scale much better to larger theorem TDGs.
+
+### Additional frontend corrections
+
+- reduced the default visible theorem list from 300 to 120,
+- simplified the visual palette toward a more neutral monochrome dashboard,
+- kept edge labels off by default,
+- and removed the heaviest unnecessary rendering options.
+
+This is materially better than the prior approach because it removes the biggest source of interaction latency rather than merely tuning around it.
+
+## 2026-03-14 dashboard simplification pass
+
+The previous dashboard still carried too much frontend complexity relative to the task.
+
+So I replaced it with a deliberately simpler static viewer:
+
+- plain Cytoscape rendering with precomputed positions,
+- no browser-side graph layout search,
+- no hover-heavy UI,
+- minimal theorem list cards,
+- simple theorem metadata,
+- simple proof-text pane,
+- and simple collapsible-witness highlighting.
+
+I also reran `scripts/08_build_tdg_dashboard.py` after the position precomputation changes.
+
+The guiding decision here was:
+
+- make the dashboard fast and reliable first,
+- then reintroduce richer UI only if it does not threaten responsiveness.
